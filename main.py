@@ -1,6 +1,7 @@
 import streamlit as st
 from supabase import create_client
-from datetime import date, datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 # =========================================================
@@ -330,7 +331,6 @@ def show_dashboard():
 # =========================================================
 # 화면 4 : 혈당 기록
 # =========================================================
-
 def show_record_page():
 
     st.title("🩸 혈당 기록")
@@ -341,6 +341,9 @@ def show_record_page():
 
     st.divider()
 
+    # 대한민국 표준시(KST) 기준 현재 날짜와 시간
+    korea_now = datetime.now(ZoneInfo("Asia/Seoul"))
+
     with st.form("glucose_form"):
 
         col1, col2 = st.columns(2)
@@ -348,13 +351,22 @@ def show_record_page():
         with col1:
             measure_date = st.date_input(
                 "📅 측정 날짜",
-                value=date.today()
+                value=korea_now.date()
             )
 
         with col2:
             measure_time = st.time_input(
                 "🕐 측정 시간",
-                value=datetime.now().time()
+                value=korea_now.time().replace(
+                    second=0,
+                    microsecond=0
+                ),
+                step=60
+            )
+
+            # 오전/오후를 쉽게 구분할 수 있도록 24시간제로 표시
+            st.caption(
+                f"선택한 시간: {measure_time.strftime('%H:%M')}"
             )
 
         glucose = st.number_input(
@@ -395,20 +407,17 @@ def show_record_page():
             use_container_width=True
         )
 
-    # -------------------------
     # 혈당 기록 저장
-    # -------------------------
-
     if save_button:
 
-        # 예외 처리 2 : 혈당 미입력
+        # 예외 처리 1 : 혈당 미입력
         if glucose <= 0:
 
             st.warning(
                 "⚠️ 혈당 수치를 입력해 주세요."
             )
 
-        # 예외 처리 3 : 측정 시점 미선택
+        # 예외 처리 2 : 측정 시점 미선택
         elif meal == "선택해 주세요":
 
             st.warning(
@@ -422,7 +431,10 @@ def show_record_page():
                 record_data = {
                     "name": st.session_state.profile_name,
                     "measure_date": str(measure_date),
-                    "measure_time": str(measure_time),
+
+                    # 24시간제(HH:MM)로 저장
+                    "measure_time": measure_time.strftime("%H:%M"),
+
                     "glucose": glucose,
                     "meal": meal,
                     "insulin": insulin,
@@ -439,7 +451,7 @@ def show_record_page():
                     f"🎉 혈당 {glucose} mg/dL 기록을 저장했어요!"
                 )
 
-            # 예외 처리 4 : 데이터베이스 저장 오류
+            # 예외 처리 3 : 데이터베이스 저장 오류
             except Exception as error:
 
                 st.error(
