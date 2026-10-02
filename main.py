@@ -30,37 +30,7 @@ def connect_supabase():
 
 
 supabase = connect_supabase()
-# ===== Supabase 연결 진단용 임시 코드 =====
-if st.button("🔧 Supabase 저장 진단"):
 
-    url = st.secrets["SUPABASE_URL"] + "/rest/v1/blood_glucose"
-    key = st.secrets["SUPABASE_KEY"]
-
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal"
-    }
-
-    test_data = {
-        "name": "연결테스트",
-        "measure_date": "2026-10-02",
-        "measure_time": "12:00",
-        "glucose": 100,
-        "meal": "공복",
-        "insulin": 0,
-        "memo": "Streamlit 연결 진단"
-    }
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=test_data
-    )
-
-    st.write("상태 코드:", response.status_code)
-    st.write("응답:", response.text)
 
 # =========================================================
 # 3. 세션 상태 초기화
@@ -68,7 +38,7 @@ if st.button("🔧 Supabase 저장 진단"):
 
 def initialize_session():
     """앱에서 사용할 세션 상태를 처음 한 번 생성"""
-    
+
     if "page" not in st.session_state:
         st.session_state.page = "start"
 
@@ -362,6 +332,7 @@ def show_dashboard():
 # =========================================================
 # 화면 4 : 혈당 기록
 # =========================================================
+
 def show_record_page():
 
     st.title("🩸 혈당 기록")
@@ -438,17 +409,20 @@ def show_record_page():
             use_container_width=True
         )
 
+    # =====================================================
     # 혈당 기록 저장
+    # =====================================================
+
     if save_button:
 
-        # 예외 처리 1 : 혈당 미입력
+        # 예외 처리 2 : 혈당 미입력
         if glucose <= 0:
 
             st.warning(
                 "⚠️ 혈당 수치를 입력해 주세요."
             )
 
-        # 예외 처리 2 : 측정 시점 미선택
+        # 예외 처리 3 : 측정 시점 미선택
         elif meal == "선택해 주세요":
 
             st.warning(
@@ -459,6 +433,23 @@ def show_record_page():
 
             try:
 
+                # Supabase Data API 주소
+                url = (
+                    st.secrets["SUPABASE_URL"]
+                    + "/rest/v1/blood_glucose"
+                )
+
+                key = st.secrets["SUPABASE_KEY"]
+
+                # Supabase Data API 요청 헤더
+                headers = {
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal"
+                }
+
+                # 저장할 혈당 기록
                 record_data = {
                     "name": st.session_state.profile_name,
                     "measure_date": str(measure_date),
@@ -472,17 +463,34 @@ def show_record_page():
                     "memo": memo
                 }
 
-                supabase.table(
-                    "blood_glucose"
-                ).insert(
-                    record_data
-                ).execute()
-
-                st.success(
-                    f"🎉 혈당 {glucose} mg/dL 기록을 저장했어요!"
+                # Supabase Data API를 이용해 혈당 기록 저장
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=record_data,
+                    timeout=10
                 )
 
-            # 예외 처리 3 : 데이터베이스 저장 오류
+                # 200번대 응답이면 저장 성공
+                if 200 <= response.status_code < 300:
+
+                    st.success(
+                        f"🎉 혈당 {glucose} mg/dL 기록을 저장했어요!"
+                    )
+
+                else:
+
+                    st.error(
+                        "❌ 기록을 저장하는 중 문제가 발생했어요."
+                    )
+
+                    with st.expander("오류 내용 확인"):
+                        st.write(
+                            f"상태 코드: {response.status_code}"
+                        )
+                        st.code(response.text)
+
+            # 예외 처리 4 : 네트워크 또는 기타 오류
             except Exception as error:
 
                 st.error(
