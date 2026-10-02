@@ -1,5 +1,6 @@
 import streamlit as st
 from supabase import create_client
+import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -29,7 +30,37 @@ def connect_supabase():
 
 
 supabase = connect_supabase()
+# ===== Supabase 연결 진단용 임시 코드 =====
+if st.button("🔧 Supabase 저장 진단"):
 
+    url = st.secrets["SUPABASE_URL"] + "/rest/v1/blood_glucose"
+    key = st.secrets["SUPABASE_KEY"]
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+    }
+
+    test_data = {
+        "name": "연결테스트",
+        "measure_date": "2026-10-02",
+        "measure_time": "12:00",
+        "glucose": 100,
+        "meal": "공복",
+        "insulin": 0,
+        "memo": "Streamlit 연결 진단"
+    }
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=test_data
+    )
+
+    st.write("상태 코드:", response.status_code)
+    st.write("응답:", response.text)
 
 # =========================================================
 # 3. 세션 상태 초기화
