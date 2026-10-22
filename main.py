@@ -1,464 +1,176 @@
-import streamlit as st
-from supabase import create_client
-import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+import streamlit as st
 
-# 기본 설정
-st.set_page_config(
-    page_title="당당케어",
-    page_icon="🩸",
-    layout="wide"
-)
+from app_shared import require_login, show_menu
 
-# 왼쪽 페이지 메뉴
-st.sidebar.page_link(
-    "main.py",
-    label="혈당 기록",
-    icon="🩸"
-)
-st.sidebar.page_link(
-    "pages/chat.py",
-    label="AI에게 물어보기",
-    icon="💬"
-)
-
-
-# Supabase 연결
-@st.cache_resource
-def connect_supabase():
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_KEY"]
-    )
-
-
-supabase = connect_supabase()
-
-
-# 세션 상태 초기화
-def initialize_session():
-    if "page" not in st.session_state:
-        st.session_state.page = "start"
-
-    if "user_type" not in st.session_state:
-        st.session_state.user_type = None
-
-    if "profile_name" not in st.session_state:
-        st.session_state.profile_name = ""
-
-
-initialize_session()
-
-
-# 공통 디자인
+st.set_page_config(page_title="당당케어", page_icon="🩸", layout="wide")
 st.markdown("""
 <style>
-.stApp {
-    background-color: #FFF9F9;
-}
-
-.main-title {
-    text-align: center;
-    font-size: 46px;
-    font-weight: 800;
-    margin-top: 40px;
-    margin-bottom: 5px;
-}
-
-.main-subtitle {
-    text-align: center;
-    font-size: 18px;
-    color: #777777;
-    margin-bottom: 35px;
-}
-
-.card {
-    background-color: white;
-    padding: 25px;
-    border-radius: 20px;
-    border: 1px solid #EEEEEE;
-    text-align: center;
-    min-height: 150px;
-}
-
-div.stButton > button {
-    border-radius: 14px;
-    height: 48px;
-    font-weight: 700;
-}
-
+.stApp { background-color: #FFF9F9; }
+div.stButton > button { border-radius: 14px; }
 div[data-testid="stForm"] {
-    background-color: white;
-    padding: 25px;
-    border-radius: 20px;
+    padding: 22px; border-radius: 18px; background: white;
     border: 1px solid #EEEEEE;
 }
 </style>
 """, unsafe_allow_html=True)
+show_menu()
+client, user = require_login()
 
+st.title("🩸 나와 가족, 반려동물의 혈당 관리")
+st.caption("관리 대상을 선택해 혈당을 기록하고 이전 기록을 확인해요.")
 
-# 화면 이동
-def move_page(page_name):
-    st.session_state.page = page_name
-    st.rerun()
-
-
-# 시작 화면
-def show_start_page():
-    st.markdown(
-        '<div class="main-title">🩸 당당케어</div>',
-        unsafe_allow_html=True
+# 프로필도 데이터베이스에 저장하므로 다시 로그인해도 불러올 수 있다.
+try:
+    profiles = (
+        client.table("care_profiles")
+        .select("id,name,profile_type,animal_type")
+        .eq("user_id", user.id)
+        .order("created_at")
+        .execute().data
     )
+except Exception:
+    st.error("관리 대상 목록을 불러오지 못했어요. 연결 상태와 care_profiles 정책을 확인해 주세요.")
+    st.stop()
 
-    st.markdown(
-        '<div class="main-subtitle">'
-        '사람과 반려동물의 혈당을 간편하게 기록하고 관리해요'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    st.write("")
-    st.subheader("누구의 혈당을 관리할까요?")
-
-    human_col, pet_col = st.columns(2)
-
-    with human_col:
-        st.markdown("""
-        <div class="card">
-            <div style="font-size:50px;">👤</div>
-            <h3>사람</h3>
-            <p>나 또는 가족의 혈당을 기록하고 관리해요.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button(
-            "👤 사람으로 시작하기",
-            use_container_width=True
-        ):
-            st.session_state.user_type = "사람"
-            move_page("profile")
-
-    with pet_col:
-        st.markdown("""
-        <div class="card">
-            <div style="font-size:50px;">🐾</div>
-            <h3>반려동물</h3>
-            <p>반려동물의 혈당을 기록하고 관리해요.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button(
-            "🐾 반려동물로 시작하기",
-            use_container_width=True
-        ):
-            st.session_state.user_type = "반려동물"
-            move_page("profile")
-
-
-# 프로필 설정 화면
-def show_profile_page():
-    st.title("✨ 프로필 설정")
-
-    if st.session_state.user_type == "사람":
-        st.write("혈당을 기록할 사람의 기본 정보를 입력해 주세요.")
-    else:
-        st.write("혈당을 기록할 반려동물의 기본 정보를 입력해 주세요.")
-
-    st.divider()
-
-    with st.form("profile_form"):
-        if st.session_state.user_type == "사람":
-            profile_name = st.text_input(
-                "이름 또는 별명",
-                placeholder="예: 나을"
-            )
-        else:
-            profile_name = st.text_input(
-                "반려동물 이름",
-                placeholder="예: 초코"
-            )
-
-            animal_type = st.selectbox(
-                "동물 종류",
-                ["강아지", "고양이", "기타"]
-            )
-
-        submitted = st.form_submit_button(
-            "관리 시작하기 →",
-            use_container_width=True
-        )
-
-    if submitted:
-        if not profile_name.strip():
-            st.warning("⚠️ 이름을 입력해 주세요.")
-        else:
-            st.session_state.profile_name = profile_name
-
-            if st.session_state.user_type == "반려동물":
-                st.session_state.animal_type = animal_type
-
-            move_page("dashboard")
-
-    if st.button("← 이전 화면"):
-        move_page("start")
-
-
-# 메인 대시보드
-def show_dashboard():
-    name = st.session_state.profile_name
-    user_type = st.session_state.user_type
-    emoji = "👤" if user_type == "사람" else "🐾"
-
-    st.title(f"{emoji} {name}의 혈당 관리")
-    st.write("혈당을 기록하거나 지금까지의 기록을 확인해 보세요.")
-    st.divider()
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("""
-        <div class="card">
-            <div style="font-size:45px;">🩸</div>
-            <h3>혈당 기록</h3>
-            <p>오늘의 혈당과 측정 상황을 기록해요.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button(
-            "혈당 기록하기",
-            use_container_width=True
-        ):
-            move_page("record")
-
-    with col2:
-        st.markdown("""
-        <div class="card">
-            <div style="font-size:45px;">📈</div>
-            <h3>기록 분석</h3>
-            <p>저장한 혈당 변화와 기록을 확인해요.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button(
-            "기록 확인하기",
-            use_container_width=True
-        ):
-            move_page("analysis")
-
-    with col3:
-        st.markdown("""
-        <div class="card">
-            <div style="font-size:45px;">🤖</div>
-            <h3>AI 검사 수치 해석</h3>
-            <p>검사 수치를 입력하고 쉽게 설명받아요.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button(
-            "AI에게 물어보기",
-            use_container_width=True
-        ):
-            move_page("ai")
-
-    st.write("")
-
-    if st.button("🔄 관리 대상 변경"):
-        st.session_state.user_type = None
-        st.session_state.profile_name = ""
-        move_page("start")
-
-
-# 혈당 기록 화면
-def show_record_page():
-    st.title("🩸 혈당 기록")
-
-    st.caption(
-        f"{st.session_state.profile_name}의 새로운 혈당 기록을 입력해 주세요."
-    )
-
-    st.divider()
-
-    korea_now = datetime.now(ZoneInfo("Asia/Seoul"))
-
-    with st.form("glucose_form"):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            measure_date = st.date_input(
-                "📅 측정 날짜",
-                value=korea_now.date()
-            )
-
-        with col2:
-            measure_time = st.time_input(
-                "🕐 측정 시간",
-                value=korea_now.time().replace(
-                    second=0,
-                    microsecond=0
-                ),
-                step=60
-            )
-
-            st.caption(
-                f"선택한 시간: {measure_time.strftime('%H:%M')}"
-            )
-
-        glucose = st.number_input(
-            "🩸 혈당 수치 (mg/dL)",
-            min_value=0,
-            max_value=1000,
-            value=0,
-            step=1
-        )
-
-        meal = st.selectbox(
-            "🍽️ 측정 시점",
-            [
-                "선택해 주세요",
-                "공복",
-                "식전",
-                "식후 1시간",
-                "식후 2시간",
-                "취침 전",
-                "기타"
-            ]
-        )
-
-        insulin = st.number_input(
-            "💉 인슐린 투여량 (단위)",
-            min_value=0.0,
-            value=0.0,
-            step=0.5
-        )
-
-        memo = st.text_area(
-            "📝 메모",
-            placeholder="식사, 활동량, 컨디션 등을 자유롭게 기록해 주세요."
-        )
-
-        save_button = st.form_submit_button(
-            "💾 혈당 기록 저장하기",
-            use_container_width=True
-        )
-
-    if save_button:
-        if glucose <= 0:
-            st.warning("⚠️ 혈당 수치를 입력해 주세요.")
-
-        elif meal == "선택해 주세요":
-            st.warning("⚠️ 혈당을 언제 측정했는지 선택해 주세요.")
-
+with st.expander("➕ 관리 대상 추가", expanded=not profiles):
+    profile_type = st.radio("대상 구분", ["사람", "반려동물"], horizontal=True)
+    with st.form("add_profile", clear_on_submit=True):
+        name = st.text_input("이름 또는 별명", max_chars=50)
+        animal_type = None
+        if profile_type == "반려동물":
+            animal_type = st.selectbox("동물 종류", ["강아지", "고양이", "기타"])
+        added = st.form_submit_button("관리 대상 등록", use_container_width=True)
+    if added:
+        if not name.strip():
+            st.warning("이름 또는 별명을 입력해 주세요.")
         else:
             try:
-                url = (
-                    st.secrets["SUPABASE_URL"]
-                    + "/rest/v1/blood_glucose"
-                )
+                profile_id = str(uuid4())
+                client.table("care_profiles").insert({
+                    "id": profile_id, "user_id": user.id,
+                    "name": name.strip(), "profile_type": profile_type,
+                    "animal_type": animal_type
+                }, returning="minimal").execute()
+                st.session_state.active_profile = profile_id
+                st.rerun()
+            except Exception:
+                st.error("관리 대상을 등록하지 못했어요. 연결 상태와 프로필 저장 정책을 확인해 주세요.")
 
-                key = st.secrets["SUPABASE_KEY"]
+if not profiles:
+    st.info("먼저 위에서 관리 대상을 등록해 주세요. 사람과 반려동물을 여러 명 등록할 수 있어요.")
+    st.stop()
 
-                headers = {
-                    "apikey": key,
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=minimal"
-                }
+profile_map = {p["id"]: p for p in profiles}
+if st.session_state.get("active_profile") not in profile_map:
+    st.session_state.active_profile = profiles[0]["id"]
 
-                record_data = {
-                    "name": st.session_state.profile_name,
-                    "measure_date": str(measure_date),
+
+def profile_label(profile_id):
+    p = profile_map[profile_id]
+    kind = p.get("animal_type") or p["profile_type"]
+    return f"{p['name']} · {kind} · {profile_id[:8]}"
+
+
+selected_id = st.selectbox(
+    "관리 대상 선택", list(profile_map),
+    format_func=profile_label, key="active_profile"
+)
+profile = profile_map[selected_id]
+st.subheader(f"{profile['name']}의 혈당 관리")
+record_tab, history_tab = st.tabs(["🩸 혈당 기록", "📈 기록·그래프"])
+
+with record_tab:
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    with st.form(f"glucose_{selected_id}"):
+        c1, c2 = st.columns(2)
+        measure_date = c1.date_input("📅 측정 날짜", value=now.date())
+        measure_time = c2.time_input(
+            "🕐 측정 시간", value=now.time().replace(second=0, microsecond=0), step=60
+        )
+        st.caption("시간은 대한민국 기준이며, 오후 1시는 13:00으로 저장돼요.")
+        glucose = st.number_input(
+            "🩸 혈당 수치 (mg/dL)", min_value=0, max_value=1000, value=0, step=1
+        )
+        meal = st.selectbox("🍽️ 측정 시점", [
+            "선택해 주세요", "공복", "식전", "식후 1시간", "식후 2시간", "취침 전", "기타"
+        ])
+        insulin = st.number_input(
+            "💉 인슐린 투여량 (단위)", min_value=0.0, value=0.0, step=0.5
+        )
+        memo = st.text_area("📝 메모", placeholder="식사, 활동량, 컨디션 등을 기록해 주세요.")
+        saved = st.form_submit_button("💾 혈당 기록 저장", use_container_width=True)
+    if saved:
+        if glucose <= 0:
+            st.warning("혈당 수치를 입력해 주세요.")
+        elif meal == "선택해 주세요":
+            st.warning("측정 시점을 선택해 주세요.")
+        else:
+            try:
+                # 로그인한 계정과 선택한 프로필의 고유번호를 함께 저장한다.
+                client.table("blood_glucose").insert({
+                    "user_id": user.id, "profile_id": selected_id,
+                    "name": profile["name"],
+                    "measure_date": measure_date.isoformat(),
                     "measure_time": measure_time.strftime("%H:%M"),
-                    "glucose": glucose,
-                    "meal": meal,
-                    "insulin": insulin,
-                    "memo": memo
-                }
+                    "glucose": glucose, "meal": meal,
+                    "insulin": insulin, "memo": memo
+                }, returning="minimal").execute()
+                st.success(f"{profile['name']}의 혈당 {glucose} mg/dL 기록을 저장했어요!")
+            except Exception:
+                st.error("저장하지 못했어요. 연결 상태와 blood_glucose의 열·저장 정책을 확인해 주세요.")
 
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    json=record_data,
-                    timeout=10
+with history_tab:
+    c1, c2 = st.columns(2)
+    start = c1.date_input("조회 시작일", value=now.date() - timedelta(days=90), key="history_start")
+    end = c2.date_input("조회 종료일", value=now.date(), key="history_end")
+    if start > end:
+        st.warning("조회 시작일은 종료일보다 늦을 수 없어요.")
+    else:
+        try:
+            rows = (
+                client.table("blood_glucose")
+                .select("measure_date,measure_time,glucose,meal,insulin,memo")
+                .eq("user_id", user.id).eq("profile_id", selected_id)
+                .gte("measure_date", start.isoformat())
+                .lte("measure_date", end.isoformat())
+                .order("measure_date", desc=True).order("measure_time", desc=True)
+                .limit(1000).execute().data
+            )
+        except Exception:
+            st.error("기록을 불러오지 못했어요. 연결 상태와 혈당 조회 정책을 확인해 주세요.")
+            rows = None
+        if rows is not None:
+            if not rows:
+                st.info("선택한 기간에 저장된 기록이 없어요.")
+            else:
+                df = pd.DataFrame(rows)
+                df["glucose"] = pd.to_numeric(df["glucose"], errors="coerce")
+                df["측정일시"] = pd.to_datetime(
+                    df["measure_date"].astype(str) + " " + df["measure_time"].astype(str),
+                    errors="coerce"
                 )
-
-                if 200 <= response.status_code < 300:
-                    st.success(
-                        f"🎉 혈당 {glucose} mg/dL 기록을 저장했어요!"
-                    )
-                else:
-                    st.error("❌ 기록을 저장하는 중 문제가 발생했어요.")
-
-                    with st.expander("오류 내용 확인"):
-                        st.write(
-                            f"상태 코드: {response.status_code}"
-                        )
-                        st.code(response.text)
-
-            except Exception as error:
-                st.error("❌ 기록을 저장하는 중 문제가 발생했어요.")
-
-                with st.expander("오류 내용 확인"):
-                    st.code(str(error))
-
-    st.write("")
-
-    if st.button("← 메인 화면으로"):
-        move_page("dashboard")
-
-
-# 기록 분석 화면
-def show_analysis_page():
-    st.title("📈 혈당 기록 분석")
-
-    st.info(
-        "다음 단계에서 Supabase에 저장된 혈당 기록과 "
-        "혈당 변화 그래프를 이 화면에 추가할 예정이에요."
-    )
-
-    if st.button("← 메인 화면으로"):
-        move_page("dashboard")
-
-
-# AI 검사 수치 해석 화면
-def show_ai_page():
-    st.title("🤖 AI 검사 수치 해석")
-
-    st.warning(
-        "AI의 설명은 검사 수치를 이해하기 위한 참고 정보이며 "
-        "의료진 또는 수의사의 진단을 대신하지 않아요."
-    )
-
-    st.info(
-        "다음 단계에서 검사 수치를 입력하고 "
-        "AI에게 설명을 요청하는 기능을 연결할 예정이에요."
-    )
-
-    if st.button("← 메인 화면으로"):
-        move_page("dashboard")
-
-
-# 현재 화면 표시
-current_page = st.session_state.page
-
-if current_page == "start":
-    show_start_page()
-
-elif current_page == "profile":
-    show_profile_page()
-
-elif current_page == "dashboard":
-    show_dashboard()
-
-elif current_page == "record":
-    show_record_page()
-
-elif current_page == "analysis":
-    show_analysis_page()
-
-elif current_page == "ai":
-    show_ai_page()
-
-else:
-    move_page("start")
+                st.caption("선택한 기간의 최신 기록을 최대 1,000개 표시해요. 더 오래된 기록은 조회 기간을 바꿔 확인해 주세요.")
+                c1, c2 = st.columns(2)
+                c1.metric("표시된 기록", f"{len(df)}개")
+                c2.metric("가장 최근 혈당", f"{rows[0]['glucose']} mg/dL")
+                chart = df.dropna(subset=["측정일시", "glucose"]).sort_values("측정일시")
+                if not chart.empty:
+                    st.line_chart(chart.set_index("측정일시")[["glucose"]].rename(
+                        columns={"glucose": "혈당 (mg/dL)"}
+                    ))
+                display = df.drop(columns=["측정일시"]).rename(columns={
+                    "measure_date": "측정 날짜", "measure_time": "측정 시간",
+                    "glucose": "혈당 (mg/dL)", "meal": "측정 시점",
+                    "insulin": "인슐린 (단위)", "memo": "메모"
+                })
+                st.dataframe(display, hide_index=True, use_container_width=True)
+                st.download_button(
+                    "📥 표시된 기록 CSV 다운로드",
+                    display.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="blood_glucose.csv", mime="text/csv"
+                )
