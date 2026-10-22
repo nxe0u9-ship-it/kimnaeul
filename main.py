@@ -5,24 +5,29 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
-# =========================================================
-# 1. 기본 설정
-# =========================================================
-
+# 기본 설정
 st.set_page_config(
     page_title="당당케어",
     page_icon="🩸",
     layout="wide"
 )
 
+# 왼쪽 페이지 메뉴
+st.sidebar.page_link(
+    "main.py",
+    label="혈당 기록",
+    icon="🩸"
+)
+st.sidebar.page_link(
+    "pages/chat.py",
+    label="AI에게 물어보기",
+    icon="💬"
+)
 
-# =========================================================
-# 2. Supabase 연결
-# =========================================================
 
+# Supabase 연결
 @st.cache_resource
 def connect_supabase():
-    """Supabase 데이터베이스에 연결하는 함수"""
     return create_client(
         st.secrets["SUPABASE_URL"],
         st.secrets["SUPABASE_KEY"]
@@ -32,13 +37,8 @@ def connect_supabase():
 supabase = connect_supabase()
 
 
-# =========================================================
-# 3. 세션 상태 초기화
-# =========================================================
-
+# 세션 상태 초기화
 def initialize_session():
-    """앱에서 사용할 세션 상태를 처음 한 번 생성"""
-
     if "page" not in st.session_state:
         st.session_state.page = "start"
 
@@ -52,19 +52,13 @@ def initialize_session():
 initialize_session()
 
 
-# =========================================================
-# 4. 공통 디자인
-# =========================================================
-
+# 공통 디자인
 st.markdown("""
 <style>
-
-/* 전체 배경 */
 .stApp {
     background-color: #FFF9F9;
 }
 
-/* 메인 제목 */
 .main-title {
     text-align: center;
     font-size: 46px;
@@ -73,7 +67,6 @@ st.markdown("""
     margin-bottom: 5px;
 }
 
-/* 부제목 */
 .main-subtitle {
     text-align: center;
     font-size: 18px;
@@ -81,7 +74,6 @@ st.markdown("""
     margin-bottom: 35px;
 }
 
-/* 카드 */
 .card {
     background-color: white;
     padding: 25px;
@@ -91,41 +83,30 @@ st.markdown("""
     min-height: 150px;
 }
 
-/* 버튼 */
 div.stButton > button {
     border-radius: 14px;
     height: 48px;
     font-weight: 700;
 }
 
-/* 폼 */
 div[data-testid="stForm"] {
     background-color: white;
     padding: 25px;
     border-radius: 20px;
     border: 1px solid #EEEEEE;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
 
-# =========================================================
-# 5. 페이지 이동 함수
-# =========================================================
-
+# 화면 이동
 def move_page(page_name):
-    """원하는 화면으로 이동"""
     st.session_state.page = page_name
     st.rerun()
 
 
-# =========================================================
-# 화면 1 : 시작 화면
-# =========================================================
-
+# 시작 화면
 def show_start_page():
-
     st.markdown(
         '<div class="main-title">🩸 당당케어</div>',
         unsafe_allow_html=True
@@ -143,9 +124,7 @@ def show_start_page():
 
     human_col, pet_col = st.columns(2)
 
-    # 사람 선택
     with human_col:
-
         st.markdown("""
         <div class="card">
             <div style="font-size:50px;">👤</div>
@@ -161,9 +140,7 @@ def show_start_page():
             st.session_state.user_type = "사람"
             move_page("profile")
 
-    # 반려동물 선택
     with pet_col:
-
         st.markdown("""
         <div class="card">
             <div style="font-size:50px;">🐾</div>
@@ -180,12 +157,8 @@ def show_start_page():
             move_page("profile")
 
 
-# =========================================================
-# 화면 2 : 프로필 설정
-# =========================================================
-
+# 프로필 설정 화면
 def show_profile_page():
-
     st.title("✨ 프로필 설정")
 
     if st.session_state.user_type == "사람":
@@ -196,16 +169,12 @@ def show_profile_page():
     st.divider()
 
     with st.form("profile_form"):
-
         if st.session_state.user_type == "사람":
-
             profile_name = st.text_input(
                 "이름 또는 별명",
                 placeholder="예: 나을"
             )
-
         else:
-
             profile_name = st.text_input(
                 "반려동물 이름",
                 placeholder="예: 초코"
@@ -213,11 +182,7 @@ def show_profile_page():
 
             animal_type = st.selectbox(
                 "동물 종류",
-                [
-                    "강아지",
-                    "고양이",
-                    "기타"
-                ]
+                ["강아지", "고양이", "기타"]
             )
 
         submitted = st.form_submit_button(
@@ -226,14 +191,9 @@ def show_profile_page():
         )
 
     if submitted:
-
-        # 예외 처리 1 : 이름 미입력
         if not profile_name.strip():
-
             st.warning("⚠️ 이름을 입력해 주세요.")
-
         else:
-
             st.session_state.profile_name = profile_name
 
             if st.session_state.user_type == "반려동물":
@@ -245,34 +205,19 @@ def show_profile_page():
         move_page("start")
 
 
-# =========================================================
-# 화면 3 : 메인 대시보드
-# =========================================================
-
+# 메인 대시보드
 def show_dashboard():
-
     name = st.session_state.profile_name
     user_type = st.session_state.user_type
-
     emoji = "👤" if user_type == "사람" else "🐾"
 
     st.title(f"{emoji} {name}의 혈당 관리")
-
-    st.write(
-        "혈당을 기록하거나 지금까지의 기록을 확인해 보세요."
-    )
-
+    st.write("혈당을 기록하거나 지금까지의 기록을 확인해 보세요.")
     st.divider()
-
-    # -------------------------
-    # 기능 카드
-    # -------------------------
 
     col1, col2, col3 = st.columns(3)
 
-    # 혈당 기록
     with col1:
-
         st.markdown("""
         <div class="card">
             <div style="font-size:45px;">🩸</div>
@@ -287,9 +232,7 @@ def show_dashboard():
         ):
             move_page("record")
 
-    # 기록 분석
     with col2:
-
         st.markdown("""
         <div class="card">
             <div style="font-size:45px;">📈</div>
@@ -304,9 +247,7 @@ def show_dashboard():
         ):
             move_page("analysis")
 
-    # AI 해석
     with col3:
-
         st.markdown("""
         <div class="card">
             <div style="font-size:45px;">🤖</div>
@@ -329,12 +270,8 @@ def show_dashboard():
         move_page("start")
 
 
-# =========================================================
-# 화면 4 : 혈당 기록
-# =========================================================
-
+# 혈당 기록 화면
 def show_record_page():
-
     st.title("🩸 혈당 기록")
 
     st.caption(
@@ -343,11 +280,9 @@ def show_record_page():
 
     st.divider()
 
-    # 대한민국 표준시(KST) 기준 현재 날짜와 시간
     korea_now = datetime.now(ZoneInfo("Asia/Seoul"))
 
     with st.form("glucose_form"):
-
         col1, col2 = st.columns(2)
 
         with col1:
@@ -366,7 +301,6 @@ def show_record_page():
                 step=60
             )
 
-            # 오전/오후를 쉽게 구분할 수 있도록 24시간제로 표시
             st.caption(
                 f"선택한 시간: {measure_time.strftime('%H:%M')}"
             )
@@ -409,31 +343,15 @@ def show_record_page():
             use_container_width=True
         )
 
-    # =====================================================
-    # 혈당 기록 저장
-    # =====================================================
-
     if save_button:
-
-        # 예외 처리 2 : 혈당 미입력
         if glucose <= 0:
+            st.warning("⚠️ 혈당 수치를 입력해 주세요.")
 
-            st.warning(
-                "⚠️ 혈당 수치를 입력해 주세요."
-            )
-
-        # 예외 처리 3 : 측정 시점 미선택
         elif meal == "선택해 주세요":
-
-            st.warning(
-                "⚠️ 혈당을 언제 측정했는지 선택해 주세요."
-            )
+            st.warning("⚠️ 혈당을 언제 측정했는지 선택해 주세요.")
 
         else:
-
             try:
-
-                # Supabase Data API 주소
                 url = (
                     st.secrets["SUPABASE_URL"]
                     + "/rest/v1/blood_glucose"
@@ -441,7 +359,6 @@ def show_record_page():
 
                 key = st.secrets["SUPABASE_KEY"]
 
-                # Supabase Data API 요청 헤더
                 headers = {
                     "apikey": key,
                     "Authorization": f"Bearer {key}",
@@ -449,21 +366,16 @@ def show_record_page():
                     "Prefer": "return=minimal"
                 }
 
-                # 저장할 혈당 기록
                 record_data = {
                     "name": st.session_state.profile_name,
                     "measure_date": str(measure_date),
-
-                    # 24시간제(HH:MM)로 저장
                     "measure_time": measure_time.strftime("%H:%M"),
-
                     "glucose": glucose,
                     "meal": meal,
                     "insulin": insulin,
                     "memo": memo
                 }
 
-                # Supabase Data API를 이용해 혈당 기록 저장
                 response = requests.post(
                     url,
                     headers=headers,
@@ -471,18 +383,12 @@ def show_record_page():
                     timeout=10
                 )
 
-                # 200번대 응답이면 저장 성공
                 if 200 <= response.status_code < 300:
-
                     st.success(
                         f"🎉 혈당 {glucose} mg/dL 기록을 저장했어요!"
                     )
-
                 else:
-
-                    st.error(
-                        "❌ 기록을 저장하는 중 문제가 발생했어요."
-                    )
+                    st.error("❌ 기록을 저장하는 중 문제가 발생했어요.")
 
                     with st.expander("오류 내용 확인"):
                         st.write(
@@ -490,12 +396,8 @@ def show_record_page():
                         )
                         st.code(response.text)
 
-            # 예외 처리 4 : 네트워크 또는 기타 오류
             except Exception as error:
-
-                st.error(
-                    "❌ 기록을 저장하는 중 문제가 발생했어요."
-                )
+                st.error("❌ 기록을 저장하는 중 문제가 발생했어요.")
 
                 with st.expander("오류 내용 확인"):
                     st.code(str(error))
@@ -506,12 +408,8 @@ def show_record_page():
         move_page("dashboard")
 
 
-# =========================================================
-# 화면 5 : 기록 분석
-# =========================================================
-
+# 기록 분석 화면
 def show_analysis_page():
-
     st.title("📈 혈당 기록 분석")
 
     st.info(
@@ -523,12 +421,8 @@ def show_analysis_page():
         move_page("dashboard")
 
 
-# =========================================================
-# 화면 6 : AI 검사 수치 해석
-# =========================================================
-
+# AI 검사 수치 해석 화면
 def show_ai_page():
-
     st.title("🤖 AI 검사 수치 해석")
 
     st.warning(
@@ -545,12 +439,8 @@ def show_ai_page():
         move_page("dashboard")
 
 
-# =========================================================
-# 6. 현재 페이지 표시
-# =========================================================
-
+# 현재 화면 표시
 current_page = st.session_state.page
-
 
 if current_page == "start":
     show_start_page()
