@@ -35,6 +35,32 @@ def show_menu():
     st.sidebar.page_link("pages/chat.py", label="AI에게 물어보기", icon="💬")
 
 
+
+def show_first_login_confirmation(client, user):
+    """인증된 계정의 첫 사용 안내. 접근 권한은 기존 Auth/RLS가 담당한다."""
+    metadata = user.user_metadata or {}
+    if not user.email_confirmed_at:
+        st.warning("메일의 Confirm email address 링크로 이메일을 인증한 뒤 다시 로그인해 주세요.")
+        st.stop()
+    if metadata.get("care_welcome_seen") is True:
+        return
+
+    st.title("🎉 회원가입이 완료됐어요!")
+    st.success("이메일 인증과 로그인을 모두 마쳤어요.")
+    st.write("당당케어에 오신 것을 환영해요. 이제 나와 가족, 반려동물의 혈당을 관리할 수 있어요.")
+    if st.button("🩸 당당케어 시작하기", use_container_width=True):
+        try:
+            # 안내 확인 여부를 계정에 저장해 다음 로그인에는 반복하지 않는다.
+            client.auth.update_user({
+                "data": {**metadata, "care_welcome_seen": True}
+            })
+        except Exception:
+            st.error("시작 설정을 저장하지 못했어요. 잠시 후 버튼을 다시 눌러 주세요.")
+        else:
+            st.rerun()
+    st.stop()
+
+
 def require_login():
     client = get_client()
     try:
@@ -56,10 +82,12 @@ def require_login():
                 pass
             st.session_state.clear()
             st.rerun()
+        show_first_login_confirmation(client, user)
         return client, user
 
     st.title("🩸 당당케어")
     st.write("로그인하고 나와 가족, 반려동물의 혈당을 관리해요.")
+    st.info("처음 가입하셨나요? 메일에서 Confirm email address를 누른 뒤 이 화면에서 로그인해 주세요. 첫 로그인 후 회원가입 완료 화면이 나와요.")
     login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
 
     with login_tab:
@@ -87,7 +115,7 @@ def require_login():
                         st.error("로그인하지 못했어요. 이메일·비밀번호와 연결 상태를 확인해 주세요.")
 
     with signup_tab:
-        st.caption("가입 후 이메일로 받은 인증 링크를 누르고, 이 앱에서 로그인해 주세요.")
+        st.caption("가입 신청 → 메일의 Confirm email address 클릭 → 앱에서 로그인 → 회원가입 완료 안내 순서예요.")
         with st.form("signup_form", clear_on_submit=True):
             new_email = st.text_input("이메일", key="signup_email")
             new_password = st.text_input("비밀번호 (8자 이상)", type="password", key="signup_password")
@@ -109,7 +137,8 @@ def require_login():
                     })
                     if result.session:
                         st.rerun()
-                    st.success("가입 요청을 보냈어요. 새 계정이면 확인 메일을 인증한 뒤 로그인해 주세요.")
+                    st.success("📩 가입 요청을 보냈어요. 이메일 인증과 첫 로그인을 마치면 회원가입 완료 화면이 나와요.")
+                    st.write("새 계정이면 받은 메일에서 Confirm email address를 누르고, 이 앱의 로그인 탭에서 가입한 이메일과 비밀번호를 입력해 주세요.")
                     st.caption("메일이 없다면 스팸함을 확인해 주세요. 이미 가입했다면 로그인 탭을 이용해 주세요.")
                 except Exception:
                     st.error("가입 요청을 처리하지 못했어요. 이메일·비밀번호 조건을 확인하거나 잠시 후 다시 시도해 주세요.")
