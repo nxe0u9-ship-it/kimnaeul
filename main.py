@@ -546,6 +546,12 @@ st.sidebar.page_link(
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
+    "pages/history.py",
+    label="기록 확인·수정",
+    icon="📈"
+)
+
+st.sidebar.page_link(
     "pages/chat.py",
     label="AI에게 물어보기",
     icon="💬"
