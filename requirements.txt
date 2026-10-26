@@ -1,5 +1,5 @@
 streamlit>=1.35,<2
 supabase>=2,<3
 pandas>=2,<3
-plotly
+plotly>=5.18,<8
 requests
