@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from hashlib import sha256
+import json
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -6,6 +8,225 @@ import pandas as pd
 import streamlit as st
 
 from app_shared import require_login
+
+
+MEALS = [
+    "선택해 주세요", "공복", "식전",
+    "식후 1시간", "식후 2시간", "취침 전", "기타"
+]
+
+
+def show_error(message, error):
+    st.error(message)
+    st.caption(
+        f"오류 종류: {type(error).__name__} / "
+        f"오류 코드: {getattr(error, 'code', None) or '없음'}"
+    )
+
+
+def change_record(
+    client, user_id, profile_id, record_id, values=None
+):
+    # 계정·관리 대상·기록 번호가 모두 일치하는 기록만 변경한다.
+    table = client.table("blood_glucose")
+
+    if values is None:
+        query = table.delete(returning="representation")
+    else:
+        query = table.update(
+            values,
+            returning="representation"
+        )
+
+    result = (
+        query.eq("user_id", user_id)
+        .eq("profile_id", profile_id)
+        .eq("record_id", record_id)
+        .execute()
+    )
+
+    # 실제 변경된 기록이 있어야 성공으로 처리한다.
+    return bool(result.data)
+
+
+def show_record_editor(client, user, profile_id, rows):
+    records = {
+        row["record_id"]: row
+        for row in rows
+    }
+
+    def record_label(record_id):
+        row = records[record_id]
+        return (
+            f"{row['measure_date']} "
+            f"{str(row['measure_time'])[:5]} · "
+            f"{row['glucose']} mg/dL · "
+            f"{row['meal']} · {record_id[:8]}"
+        )
+
+    st.markdown("### ✏️ 기록 수정·삭제")
+
+    target_id = st.selectbox(
+        "수정하거나 삭제할 기록",
+        list(records),
+        format_func=record_label,
+        key=f"record_choice_{profile_id}"
+    )
+
+    row = records[target_id]
+
+    # 저장된 내용이 바뀌면 입력칸도 최신 값으로 다시 만든다.
+    revision = sha256(
+        json.dumps(
+            row, sort_keys=True, default=str
+        ).encode()
+    ).hexdigest()[:12]
+
+    prefix = f"{profile_id}_{target_id}_{revision}"
+    original_meal = row.get("meal") or "기타"
+
+    options = (
+        MEALS
+        if original_meal in MEALS
+        else MEALS + [original_meal]
+    )
+
+    with st.form(f"edit_{prefix}"):
+        c1, c2 = st.columns(2)
+
+        edited_date = c1.date_input(
+            "측정 날짜 수정",
+            value=date.fromisoformat(row["measure_date"])
+        )
+
+        edited_time = c2.time_input(
+            "측정 시간 수정",
+            value=time.fromisoformat(row["measure_time"]),
+            step=60
+        )
+
+        edited_glucose = st.number_input(
+            "혈당 수치 수정 (mg/dL)",
+            min_value=0,
+            max_value=1000,
+            value=int(row["glucose"]),
+            step=1
+        )
+
+        edited_meal = st.selectbox(
+            "측정 시점 수정",
+            options,
+            index=options.index(original_meal)
+        )
+
+        edited_insulin = st.number_input(
+            "인슐린 투여량 수정 (단위)",
+            min_value=0.0,
+            value=float(row.get("insulin") or 0),
+            step=0.5
+        )
+
+        edited_memo = st.text_area(
+            "메모 수정",
+            value=row.get("memo") or ""
+        )
+
+        submitted = st.form_submit_button(
+            "💾 수정 내용 저장",
+            use_container_width=True
+        )
+
+    if submitted:
+        if edited_glucose <= 0:
+            st.warning("혈당 수치를 입력해 주세요.")
+
+        elif edited_meal == "선택해 주세요":
+            st.warning("측정 시점을 선택해 주세요.")
+
+        else:
+            values = {
+                "measure_date": edited_date.isoformat(),
+                "measure_time": edited_time.strftime("%H:%M"),
+                "glucose": edited_glucose,
+                "meal": edited_meal,
+                "insulin": edited_insulin,
+                "memo": edited_memo
+            }
+
+            try:
+                changed = change_record(
+                    client, user.id, profile_id,
+                    target_id, values
+                )
+
+            except Exception as error:
+                show_error(
+                    "수정 결과를 확인하지 못했어요. "
+                    "목록을 새로 확인해 주세요.",
+                    error
+                )
+
+            else:
+                if changed:
+                    st.session_state.record_notice = (
+                        user.id,
+                        profile_id,
+                        "혈당 기록을 수정했어요."
+                    )
+                    st.rerun()
+
+                else:
+                    st.warning(
+                        "변경된 기록이 없어요. "
+                        "기록 존재 여부와 수정 정책을 확인해 주세요."
+                    )
+
+    with st.form(f"delete_{prefix}"):
+        st.warning(
+            "선택한 기록 한 건을 삭제해요. "
+            "삭제한 기록은 앱에서 복구할 수 없어요."
+        )
+
+        confirmed = st.checkbox(
+            "위에서 선택한 기록을 삭제하는 데 동의해요."
+        )
+
+        delete_clicked = st.form_submit_button(
+            "🗑️ 선택한 기록 삭제",
+            use_container_width=True
+        )
+
+    if delete_clicked:
+        if not confirmed:
+            st.warning("삭제 확인란을 먼저 체크해 주세요.")
+
+        else:
+            try:
+                changed = change_record(
+                    client, user.id, profile_id, target_id
+                )
+
+            except Exception as error:
+                show_error(
+                    "삭제 결과를 확인하지 못했어요. "
+                    "목록을 새로 확인해 주세요.",
+                    error
+                )
+
+            else:
+                if changed:
+                    st.session_state.record_notice = (
+                        user.id,
+                        profile_id,
+                        "혈당 기록을 삭제했어요."
+                    )
+                    st.rerun()
+
+                else:
+                    st.warning(
+                        "삭제된 기록이 없어요. "
+                        "기록 존재 여부와 삭제 정책을 확인해 주세요."
+                    )
 
 
 st.set_page_config(
@@ -16,12 +237,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp {
-    background-color: #FFF9F9;
-}
-div.stButton > button {
-    border-radius: 14px;
-}
+.stApp { background-color: #FFF9F9; }
+div.stButton > button { border-radius: 14px; }
 div[data-testid="stForm"] {
     padding: 22px;
     border-radius: 18px;
@@ -31,7 +248,6 @@ div[data-testid="stForm"] {
 </style>
 """, unsafe_allow_html=True)
 
-# 혈당 기록 메뉴 아래에 관리 대상 목록을 표시한다.
 st.sidebar.title("🩸 당당케어")
 st.sidebar.page_link(
     "main.py",
@@ -55,7 +271,7 @@ st.caption(
     "혈당을 기록하고 이전 기록을 확인해요."
 )
 
-# 로그인한 계정의 관리 대상만 불러온다.
+# 로그인한 계정의 관리 대상만 조회한다.
 try:
     profiles = (
         client.table("care_profiles")
@@ -65,14 +281,14 @@ try:
         .execute()
         .data
     )
-except Exception:
-    st.error(
-        "관리 대상 목록을 불러오지 못했어요. "
-        "연결 상태와 care_profiles 정책을 확인해 주세요."
+
+except Exception as error:
+    show_error(
+        "관리 대상 목록을 불러오지 못했어요.",
+        error
     )
     st.stop()
 
-# 관리 대상 추가
 with st.expander("➕ 관리 대상 추가", expanded=not profiles):
     profile_type = st.radio(
         "대상 구분",
@@ -102,10 +318,11 @@ with st.expander("➕ 관리 대상 추가", expanded=not profiles):
     if added:
         if not name.strip():
             st.warning("이름 또는 별명을 입력해 주세요.")
-        else:
-            try:
-                profile_id = str(uuid4())
 
+        else:
+            profile_id = str(uuid4())
+
+            try:
                 client.table("care_profiles").insert(
                     {
                         "id": profile_id,
@@ -118,26 +335,18 @@ with st.expander("➕ 관리 대상 추가", expanded=not profiles):
                 ).execute()
 
             except Exception as error:
-                st.error(
+                show_error(
                     "관리 대상을 등록하지 못했어요. "
-                    "잠시 후 다시 시도해 주세요."
-                )
-
-                error_code = getattr(error, "code", None)
-
-                st.caption(
-                    f"오류 종류: {type(error).__name__} / "
-                    f"오류 코드: {error_code or '없음'}"
+                    "잠시 후 다시 시도해 주세요.",
+                    error
                 )
 
             else:
-                # 새로 등록한 대상을 바로 선택한다.
                 st.session_state.active_profile = profile_id
                 st.rerun()
 
 if not profiles:
     profile_menu.caption("등록된 관리 대상이 없어요.")
-
     st.info(
         "먼저 위에서 관리 대상을 등록해 주세요. "
         "사람과 반려동물을 여러 명 등록할 수 있어요."
@@ -152,8 +361,6 @@ profile_map = {
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
-# 왼쪽 메뉴에서 관리 대상을 전환한다.
-# 선택값을 버튼과 분리해 페이지를 이동해도 유지한다.
 with profile_menu:
     st.caption("관리 대상")
 
@@ -162,7 +369,6 @@ with profile_menu:
         icon = "👤" if item["profile_type"] == "사람" else "🐾"
         label = f"{icon} {item['name']} · {kind}"
 
-        # 같은 이름이 있으면 고유번호 일부도 표시한다.
         if sum(p["name"] == item["name"] for p in profiles) > 1:
             label += f" · {item['id'][:8]}"
 
@@ -184,14 +390,20 @@ profile = profile_map[selected_id]
 
 st.subheader(f"{profile['name']}의 혈당 관리")
 
+# 수정·삭제 후 새 화면에서도 완료 안내를 표시한다.
+notice = st.session_state.pop("record_notice", None)
+
+if notice and notice[:2] == (user.id, selected_id):
+    st.success(notice[2])
+
 record_tab, history_tab = st.tabs([
     "🩸 혈당 기록",
-    "📈 기록·그래프"
+    "📈 기록·그래프·수정"
 ])
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-# 혈당 기록 입력
+# 새 혈당 기록 저장
 with record_tab:
     with st.form(f"glucose_{selected_id}"):
         c1, c2 = st.columns(2)
@@ -204,8 +416,7 @@ with record_tab:
         measure_time = c2.time_input(
             "🕐 측정 시간",
             value=now.time().replace(
-                second=0,
-                microsecond=0
+                second=0, microsecond=0
             ),
             step=60
         )
@@ -223,18 +434,7 @@ with record_tab:
             step=1
         )
 
-        meal = st.selectbox(
-            "🍽️ 측정 시점",
-            [
-                "선택해 주세요",
-                "공복",
-                "식전",
-                "식후 1시간",
-                "식후 2시간",
-                "취침 전",
-                "기타"
-            ]
-        )
+        meal = st.selectbox("🍽️ 측정 시점", MEALS)
 
         insulin = st.number_input(
             "💉 인슐린 투여량 (단위)",
@@ -262,7 +462,6 @@ with record_tab:
 
         else:
             try:
-                # 계정과 선택한 관리 대상의 고유번호를 저장한다.
                 client.table("blood_glucose").insert(
                     {
                         "user_id": user.id,
@@ -278,10 +477,10 @@ with record_tab:
                     returning="minimal"
                 ).execute()
 
-            except Exception:
-                st.error(
-                    "저장하지 못했어요. 연결 상태와 "
-                    "blood_glucose의 열·저장 정책을 확인해 주세요."
+            except Exception as error:
+                show_error(
+                    "기록을 저장하지 못했어요.",
+                    error
                 )
 
             else:
@@ -290,7 +489,7 @@ with record_tab:
                     f"{glucose} mg/dL 기록을 저장했어요!"
                 )
 
-# 선택한 관리 대상의 이전 기록과 그래프
+# 기록 조회·그래프·수정·삭제
 with history_tab:
     c1, c2 = st.columns(2)
 
@@ -307,14 +506,16 @@ with history_tab:
     )
 
     if start > end:
-        st.warning("조회 시작일은 종료일보다 늦을 수 없어요.")
+        st.warning(
+            "조회 시작일은 종료일보다 늦을 수 없어요."
+        )
 
     else:
         try:
             rows = (
                 client.table("blood_glucose")
                 .select(
-                    "measure_date,measure_time,"
+                    "record_id,measure_date,measure_time,"
                     "glucose,meal,insulin,memo"
                 )
                 .eq("user_id", user.id)
@@ -323,21 +524,25 @@ with history_tab:
                 .lte("measure_date", end.isoformat())
                 .order("measure_date", desc=True)
                 .order("measure_time", desc=True)
+                .order("record_id")
                 .limit(1000)
                 .execute()
                 .data
             )
 
-        except Exception:
-            st.error(
+        except Exception as error:
+            show_error(
                 "기록을 불러오지 못했어요. "
-                "연결 상태와 혈당 조회 정책을 확인해 주세요."
+                "Supabase 설정 적용 여부와 연결 상태를 확인해 주세요.",
+                error
             )
             rows = None
 
         if rows is not None:
             if not rows:
-                st.info("선택한 기간에 저장된 기록이 없어요.")
+                st.info(
+                    "선택한 기간에 저장된 기록이 없어요."
+                )
 
             else:
                 df = pd.DataFrame(rows)
@@ -356,19 +561,25 @@ with history_tab:
 
                 st.caption(
                     "선택한 기간의 최신 기록을 최대 1,000개 표시해요. "
-                    "더 오래된 기록은 조회 기간을 바꿔 확인해 주세요."
+                    "수정할 기록이 없으면 조회 기간을 바꿔 주세요."
                 )
 
                 c1, c2 = st.columns(2)
 
-                c1.metric("표시된 기록", f"{len(df)}개")
+                c1.metric(
+                    "표시된 기록",
+                    f"{len(df)}개"
+                )
+
                 c2.metric(
                     "가장 최근 혈당",
                     f"{rows[0]['glucose']} mg/dL"
                 )
 
                 chart = (
-                    df.dropna(subset=["측정일시", "glucose"])
+                    df.dropna(
+                        subset=["측정일시", "glucose"]
+                    )
                     .sort_values("측정일시")
                 )
 
@@ -381,7 +592,7 @@ with history_tab:
                     )
 
                 display = df.drop(
-                    columns=["측정일시"]
+                    columns=["측정일시", "record_id"]
                 ).rename(
                     columns={
                         "measure_date": "측정 날짜",
@@ -404,4 +615,8 @@ with history_tab:
                     display.to_csv(index=False).encode("utf-8-sig"),
                     file_name="blood_glucose.csv",
                     mime="text/csv"
+                )
+
+                show_record_editor(
+                    client, user, selected_id, rows
                 )
