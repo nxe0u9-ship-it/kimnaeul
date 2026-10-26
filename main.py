@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from app_shared import require_login, show_menu
+from app_shared import require_login
 
 
 st.set_page_config(
@@ -31,15 +31,31 @@ div[data-testid="stForm"] {
 </style>
 """, unsafe_allow_html=True)
 
-show_menu()
+# 혈당 기록 메뉴 아래에 관리 대상 목록을 표시한다.
+st.sidebar.title("🩸 당당케어")
+st.sidebar.page_link(
+    "main.py",
+    label="혈당 기록",
+    icon="🩸"
+)
+
+profile_menu = st.sidebar.container()
+
+st.sidebar.page_link(
+    "pages/chat.py",
+    label="AI에게 물어보기",
+    icon="💬"
+)
+
 client, user = require_login()
 
 st.title("🩸 나와 가족, 반려동물의 혈당 관리")
 st.caption(
-    "관리 대상을 선택해 혈당을 기록하고 이전 기록을 확인해요."
+    "왼쪽에서 관리 대상을 선택해 "
+    "혈당을 기록하고 이전 기록을 확인해요."
 )
 
-# 저장된 관리 대상 목록을 불러온다.
+# 로그인한 계정의 관리 대상만 불러온다.
 try:
     profiles = (
         client.table("care_profiles")
@@ -107,7 +123,6 @@ with st.expander("➕ 관리 대상 추가", expanded=not profiles):
                     "잠시 후 다시 시도해 주세요."
                 )
 
-                # 개인정보 대신 오류 종류와 코드만 표시한다.
                 error_code = getattr(error, "code", None)
 
                 st.caption(
@@ -116,43 +131,55 @@ with st.expander("➕ 관리 대상 추가", expanded=not profiles):
                 )
 
             else:
+                # 새로 등록한 대상을 바로 선택한다.
                 st.session_state.active_profile = profile_id
                 st.rerun()
 
 if not profiles:
+    profile_menu.caption("등록된 관리 대상이 없어요.")
+
     st.info(
         "먼저 위에서 관리 대상을 등록해 주세요. "
         "사람과 반려동물을 여러 명 등록할 수 있어요."
     )
     st.stop()
 
-# 고유번호를 기준으로 관리 대상을 선택한다.
 profile_map = {
-    profile["id"]: profile
-    for profile in profiles
+    item["id"]: item
+    for item in profiles
 }
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
+# 왼쪽 메뉴에서 관리 대상을 전환한다.
+# 선택값을 버튼과 분리해 페이지를 이동해도 유지한다.
+with profile_menu:
+    st.caption("관리 대상")
 
-def profile_label(profile_id):
-    profile = profile_map[profile_id]
-    kind = profile.get("animal_type") or profile["profile_type"]
+    for item in profiles:
+        kind = item.get("animal_type") or item["profile_type"]
+        icon = "👤" if item["profile_type"] == "사람" else "🐾"
+        label = f"{icon} {item['name']} · {kind}"
 
-    return (
-        f"{profile['name']} · "
-        f"{kind} · {profile_id[:8]}"
-    )
+        # 같은 이름이 있으면 고유번호 일부도 표시한다.
+        if sum(p["name"] == item["name"] for p in profiles) > 1:
+            label += f" · {item['id'][:8]}"
 
+        is_selected = (
+            item["id"] == st.session_state.active_profile
+        )
 
-selected_id = st.selectbox(
-    "관리 대상 선택",
-    list(profile_map),
-    format_func=profile_label,
-    key="active_profile"
-)
+        if st.button(
+            label,
+            key=f"choose_profile_{item['id']}",
+            type="primary" if is_selected else "secondary",
+            use_container_width=True
+        ):
+            st.session_state.active_profile = item["id"]
+            st.rerun()
 
+selected_id = st.session_state.active_profile
 profile = profile_map[selected_id]
 
 st.subheader(f"{profile['name']}의 혈당 관리")
@@ -235,7 +262,7 @@ with record_tab:
 
         else:
             try:
-                # 계정과 관리 대상의 고유번호를 함께 저장한다.
+                # 계정과 선택한 관리 대상의 고유번호를 저장한다.
                 client.table("blood_glucose").insert(
                     {
                         "user_id": user.id,
@@ -263,7 +290,7 @@ with record_tab:
                     f"{glucose} mg/dL 기록을 저장했어요!"
                 )
 
-# 이전 기록 조회 및 그래프
+# 선택한 관리 대상의 이전 기록과 그래프
 with history_tab:
     c1, c2 = st.columns(2)
 
@@ -280,9 +307,7 @@ with history_tab:
     )
 
     if start > end:
-        st.warning(
-            "조회 시작일은 종료일보다 늦을 수 없어요."
-        )
+        st.warning("조회 시작일은 종료일보다 늦을 수 없어요.")
 
     else:
         try:
@@ -312,9 +337,7 @@ with history_tab:
 
         if rows is not None:
             if not rows:
-                st.info(
-                    "선택한 기간에 저장된 기록이 없어요."
-                )
+                st.info("선택한 기간에 저장된 기록이 없어요.")
 
             else:
                 df = pd.DataFrame(rows)
@@ -338,20 +361,14 @@ with history_tab:
 
                 c1, c2 = st.columns(2)
 
-                c1.metric(
-                    "표시된 기록",
-                    f"{len(df)}개"
-                )
-
+                c1.metric("표시된 기록", f"{len(df)}개")
                 c2.metric(
                     "가장 최근 혈당",
                     f"{rows[0]['glucose']} mg/dL"
                 )
 
                 chart = (
-                    df.dropna(
-                        subset=["측정일시", "glucose"]
-                    )
+                    df.dropna(subset=["측정일시", "glucose"])
                     .sort_values("측정일시")
                 )
 
@@ -359,9 +376,7 @@ with history_tab:
                     st.line_chart(
                         chart.set_index("측정일시")[["glucose"]]
                         .rename(
-                            columns={
-                                "glucose": "혈당 (mg/dL)"
-                            }
+                            columns={"glucose": "혈당 (mg/dL)"}
                         )
                     )
 
