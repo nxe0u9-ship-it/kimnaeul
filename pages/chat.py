@@ -35,6 +35,12 @@ st.sidebar.page_link(
     icon="📈"
 )
 
+st.sidebar.page_link(
+    "pages/lifestyle.py",
+    label="식사·활동 기록",
+    icon="📝"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
@@ -115,7 +121,7 @@ else:
     profile_menu.caption("등록된 관리 대상이 없어요.")
 
 
-# AI 페이지
+# AI 화면
 st.title("💬 AI에게 물어보기")
 st.caption(
     "사람과 반려동물의 혈당과 검사 결과를 "
@@ -124,7 +130,10 @@ st.caption(
 
 if profiles:
     profile = profile_map[st.session_state.active_profile]
-    kind = profile.get("animal_type") or profile["profile_type"]
+    kind = (
+        profile.get("animal_type")
+        or profile["profile_type"]
+    )
 
     st.info(
         f"현재 선택한 관리 대상: "
@@ -133,7 +142,7 @@ if profiles:
 
 st.info(
     "AI 답변 기능은 아직 연결 전이에요. "
-    "혈당 입력과 기록 조회는 왼쪽 메뉴에서 이용해 주세요."
+    "혈당과 식사·활동 기록은 왼쪽 메뉴에서 이용해 주세요."
 )
 
 st.caption(
