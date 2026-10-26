@@ -141,7 +141,7 @@ def select_from_table(rows, scope):
     if positions and 0 <= positions[0] < len(rows):
         return rows[positions[0]]
 
-    st.info("表 왼쪽 선택란에서 기록 한 건을 선택해 주세요.".replace("表", "표"))
+    st.info("표 왼쪽 선택란에서 기록 한 건을 선택해 주세요.")
     return None
 
 
@@ -183,6 +183,7 @@ def show_graph(rows, scope, selectable):
     label_step = max(1, (count + 19) // 20)
 
     labels = []
+
     for i, value in enumerate(chart["glucose"]):
         visible = (
             label_mode == "모두 표시"
@@ -219,6 +220,7 @@ def show_graph(rows, scope, selectable):
     if selectable:
         for point in previous_points:
             custom = point.get("customdata")
+
             if isinstance(custom, (list, tuple)) and custom:
                 selected_ids.add(str(custom[0]))
 
@@ -294,6 +296,7 @@ def show_graph(rows, scope, selectable):
             "기록이 많으면 일부 점에만 수치를 표시해요. "
             "모든 값은 아래 표에서도 확인할 수 있어요."
         )
+
     elif label_mode == "모두 표시":
         st.caption(
             "수치가 겹치면 조회 기간을 줄이거나 "
@@ -369,11 +372,13 @@ def edit_record(client, user, profile_id, row):
             "측정 날짜",
             value=date.fromisoformat(row["measure_date"])
         )
+
         edited_time = c2.time_input(
             "측정 시간",
             value=time.fromisoformat(row["measure_time"]),
             step=60
         )
+
         edited_glucose = st.number_input(
             "혈당 수치 (mg/dL)",
             min_value=1,
@@ -381,20 +386,25 @@ def edit_record(client, user, profile_id, row):
             value=int(row["glucose"]),
             step=1
         )
+
         edited_meal = st.selectbox(
             "측정 시점",
             options,
             index=options.index(original_meal)
         )
+
         edited_insulin = st.number_input(
             "인슐린 투여량 (단위)",
             min_value=0.0,
             value=float(row.get("insulin") or 0),
             step=0.5
         )
+
         edited_memo = st.text_area(
-            "메모", value=row.get("memo") or ""
+            "메모",
+            value=row.get("memo") or ""
         )
+
         save = st.form_submit_button(
             "💾 수정 내용 저장",
             use_container_width=True
@@ -415,19 +425,23 @@ def edit_record(client, user, profile_id, row):
                 client, user.id, profile_id,
                 row["record_id"], values
             )
+
         except Exception as error:
             show_error(
                 "수정 결과를 확인하지 못했어요. "
                 "목록을 새로 확인해 주세요.",
                 error
             )
+
         else:
             if changed:
                 st.session_state.history_notice = (
-                    user.id, profile_id,
+                    user.id,
+                    profile_id,
                     "혈당 기록을 수정했어요."
                 )
                 st.rerun()
+
             else:
                 st.warning(
                     "변경된 기록이 없어요. "
@@ -439,9 +453,11 @@ def edit_record(client, user, profile_id, row):
             "선택한 기록 한 건을 삭제해요. "
             "삭제한 기록은 앱에서 복구할 수 없어요."
         )
+
         confirmed = st.checkbox(
             "위에서 선택한 기록의 삭제를 확인했어요."
         )
+
         delete = st.form_submit_button(
             "🗑️ 선택한 기록 삭제",
             use_container_width=True
@@ -450,25 +466,30 @@ def edit_record(client, user, profile_id, row):
     if delete:
         if not confirmed:
             st.warning("삭제 확인란을 먼저 체크해 주세요.")
+
         else:
             try:
                 changed = change_record(
                     client, user.id, profile_id,
                     row["record_id"]
                 )
+
             except Exception as error:
                 show_error(
                     "삭제 결과를 확인하지 못했어요. "
                     "목록을 새로 확인해 주세요.",
                     error
                 )
+
             else:
                 if changed:
                     st.session_state.history_notice = (
-                        user.id, profile_id,
+                        user.id,
+                        profile_id,
                         "혈당 기록을 삭제했어요."
                     )
                     st.rerun()
+
                 else:
                     st.warning(
                         "삭제된 기록이 없어요. "
@@ -485,7 +506,11 @@ st.set_page_config(
 st.markdown("""
 <style>
 .stApp { background-color: #FFF9F9; }
-div.stButton > button { border-radius: 14px; }
+
+div.stButton > button {
+    border-radius: 14px;
+}
+
 div[data-testid="stForm"] {
     padding: 22px;
     border-radius: 18px;
@@ -495,14 +520,26 @@ div[data-testid="stForm"] {
 </style>
 """, unsafe_allow_html=True)
 
+
+# 왼쪽 메뉴
 st.sidebar.title("🩸 당당케어")
+
 st.sidebar.page_link(
-    "main.py", label="혈당 기록하기", icon="🩸"
+    "main.py",
+    label="혈당 기록하기",
+    icon="🩸"
 )
+
 st.sidebar.page_link(
     "pages/history.py",
     label="기록 확인·수정",
     icon="📈"
+)
+
+st.sidebar.page_link(
+    "pages/lifestyle.py",
+    label="식사·활동 기록",
+    icon="📝"
 )
 
 profile_menu = st.sidebar.container()
@@ -513,6 +550,8 @@ st.sidebar.page_link(
     icon="💬"
 )
 
+
+# 로그인 확인
 client, user = require_login()
 
 st.title("📈 기록 확인·수정")
@@ -521,6 +560,8 @@ st.caption(
     "원하는 기록을 찾아 수정하거나 삭제해요."
 )
 
+
+# 관리 대상 조회
 try:
     profiles = (
         client.table("care_profiles")
@@ -530,34 +571,57 @@ try:
         .execute()
         .data
     ) or []
+
 except Exception as error:
     show_error("관리 대상을 불러오지 못했어요.", error)
     st.stop()
 
 if not profiles:
-    st.info("먼저 혈당 기록하기 페이지에서 관리 대상을 등록해 주세요.")
+    st.info(
+        "먼저 혈당 기록하기 페이지에서 "
+        "관리 대상을 등록해 주세요."
+    )
     st.page_link(
-        "main.py", label="관리 대상 등록하러 가기", icon="➕"
+        "main.py",
+        label="관리 대상 등록하러 가기",
+        icon="➕"
     )
     st.stop()
 
-profile_map = {item["id"]: item for item in profiles}
+profile_map = {
+    item["id"]: item
+    for item in profiles
+}
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
+
+# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
     for item in profiles:
-        icon = "👤" if item["profile_type"] == "사람" else "🐾"
-        kind = item.get("animal_type") or item["profile_type"]
+        icon = (
+            "👤"
+            if item["profile_type"] == "사람"
+            else "🐾"
+        )
+        kind = (
+            item.get("animal_type")
+            or item["profile_type"]
+        )
         label = f"{icon} {item['name']} · {kind}"
 
-        if sum(p["name"] == item["name"] for p in profiles) > 1:
+        if sum(
+            p["name"] == item["name"]
+            for p in profiles
+        ) > 1:
             label += f" · {item['id'][:8]}"
 
-        active = item["id"] == st.session_state.active_profile
+        active = (
+            item["id"] == st.session_state.active_profile
+        )
 
         if st.button(
             label,
@@ -581,6 +645,8 @@ if notice and notice[:2] == (user.id, profile_id):
 
 today = datetime.now(ZoneInfo("Asia/Seoul")).date()
 
+
+# 조회 기간 선택
 period = st.radio(
     "조회 기간",
     ["오늘", "최근 7일", "최근 30일", "직접 설정"],
@@ -591,21 +657,32 @@ period = st.radio(
 
 if period == "직접 설정":
     c1, c2 = st.columns(2)
+
     start = c1.date_input(
         "조회 시작일",
         value=today - timedelta(days=90),
         key=f"history_start_{scope}"
     )
+
     end = c2.date_input(
         "조회 종료일",
         value=today,
         key=f"history_end_{scope}"
     )
+
 else:
-    days = {"오늘": 1, "최근 7일": 7, "최근 30일": 30}[period]
+    days = {
+        "오늘": 1,
+        "최근 7일": 7,
+        "최근 30일": 30
+    }[period]
+
     start = today - timedelta(days=days - 1)
     end = today
-    st.caption(f"📅 {start:%Y-%m-%d} ~ {end:%Y-%m-%d}")
+
+    st.caption(
+        f"📅 {start:%Y-%m-%d} ~ {end:%Y-%m-%d}"
+    )
 
 if start > end:
     st.warning("조회 시작일은 종료일보다 늦을 수 없어요.")
@@ -617,6 +694,8 @@ meal = st.selectbox(
     key=f"history_meal_filter_{scope}"
 )
 
+
+# 기록 수정·삭제 모드
 editing = st.toggle(
     "✏️ 기록 수정·삭제",
     key=f"history_editing_{scope}"
@@ -630,11 +709,17 @@ memo = ""
 if editing:
     method = st.radio(
         "기록을 찾는 방법",
-        ["그래프에서 선택", "검색해서 찾기", "표에서 선택"],
+        [
+            "그래프에서 선택",
+            "검색해서 찾기",
+            "표에서 선택"
+        ],
         horizontal=True,
         key=f"history_method_{scope}"
     )
 
+
+# 검색 조건
 if method == "검색해서 찾기":
     st.caption(
         "위의 조회 기간·측정 시점 안에서 검색해요. "
@@ -645,6 +730,7 @@ if method == "검색해서 찾기":
         "특정 날짜로 찾기",
         key=f"history_use_date_{scope}"
     )
+
     picked_date = st.date_input(
         "찾을 날짜",
         value=end,
@@ -658,6 +744,7 @@ if method == "검색해서 찾기":
     )
 
     c1, c2 = st.columns(2)
+
     from_time = c1.time_input(
         "시작 시간",
         value=time(0, 0),
@@ -665,6 +752,7 @@ if method == "검색해서 찾기":
         disabled=not use_time,
         key=f"history_from_time_{scope}"
     )
+
     to_time = c2.time_input(
         "종료 시간",
         value=time(23, 59),
@@ -680,27 +768,46 @@ if method == "검색해서 찾기":
     )
 
     if not (use_date or use_time or memo.strip()):
-        st.info("날짜·시간대·메모 중 검색 조건을 하나 이상 입력해 주세요.")
+        st.info(
+            "날짜·시간대·메모 중 "
+            "검색 조건을 하나 이상 입력해 주세요."
+        )
         st.stop()
 
     if use_date:
         if not start <= picked_date <= end:
-            st.warning("찾을 날짜가 조회 기간 밖에 있어요. 조회 기간을 바꿔 주세요.")
+            st.warning(
+                "찾을 날짜가 조회 기간 밖에 있어요. "
+                "조회 기간을 바꿔 주세요."
+            )
             st.stop()
+
         search_date = picked_date
 
     if use_time:
         if from_time > to_time:
-            st.warning("시작 시간은 종료 시간보다 늦을 수 없어요.")
+            st.warning(
+                "시작 시간은 종료 시간보다 늦을 수 없어요."
+            )
             st.stop()
+
         time_range = (from_time, to_time)
 
+
+# 기록 불러오기
 try:
     rows = load_records(
-        client, user.id, profile_id,
-        start, end, meal,
-        search_date, time_range, memo
+        client,
+        user.id,
+        profile_id,
+        start,
+        end,
+        meal,
+        search_date,
+        time_range,
+        memo
     )
+
 except Exception as error:
     show_error("기록을 불러오지 못했어요.", error)
     st.stop()
@@ -717,19 +824,33 @@ st.caption(
     "더 오래된 기록은 조회 기간을 좁혀 찾아 주세요."
 )
 
+
+# 기록 요약
 c1, c2 = st.columns(2)
-c1.metric("표시된 기록", f"{len(rows)}개")
+
+c1.metric(
+    "표시된 기록",
+    f"{len(rows)}개"
+)
+
 c2.metric(
     "조회 결과의 최근 혈당",
     f"{rows[0]['glucose']} mg/dL"
 )
 
+
+# 그래프
 selected = show_graph(
     rows,
     scope,
-    selectable=editing and method == "그래프에서 선택"
+    selectable=(
+        editing
+        and method == "그래프에서 선택"
+    )
 )
 
+
+# 표 또는 검색 결과에서 선택
 if editing and method in ["검색해서 찾기", "표에서 선택"]:
     st.markdown(
         "### 🔎 검색 결과"
@@ -737,6 +858,7 @@ if editing and method in ["검색해서 찾기", "표에서 선택"]:
         else "### 📋 표에서 기록 선택"
     )
     selected = select_from_table(rows, scope)
+
 else:
     st.markdown("### 📋 기록 목록")
     st.dataframe(
@@ -745,9 +867,18 @@ else:
         use_container_width=True
     )
 
-if editing and selected is not None:
-    edit_record(client, user, profile_id, selected)
 
+# 선택한 기록 수정·삭제
+if editing and selected is not None:
+    edit_record(
+        client,
+        user,
+        profile_id,
+        selected
+    )
+
+
+# CSV 다운로드
 st.download_button(
     "📥 표시된 기록 CSV 다운로드",
     data=display_records(rows).to_csv(
