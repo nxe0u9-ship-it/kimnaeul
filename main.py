@@ -54,13 +54,19 @@ st.sidebar.page_link(
     icon="🩸"
 )
 
-profile_menu = st.sidebar.container()
-
 st.sidebar.page_link(
     "pages/history.py",
     label="기록 확인·수정",
     icon="📈"
 )
+
+st.sidebar.page_link(
+    "pages/lifestyle.py",
+    label="식사·활동 기록",
+    icon="📝"
+)
+
+profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
     "pages/chat.py",
@@ -88,7 +94,7 @@ try:
         .order("created_at")
         .execute()
         .data
-    )
+    ) or []
 
 except Exception as error:
     show_error(
@@ -136,12 +142,12 @@ with st.expander(
             st.warning("이름 또는 별명을 입력해 주세요.")
 
         else:
-            profile_id = str(uuid4())
+            new_profile_id = str(uuid4())
 
             try:
                 client.table("care_profiles").insert(
                     {
-                        "id": profile_id,
+                        "id": new_profile_id,
                         "user_id": user.id,
                         "name": name.strip(),
                         "profile_type": profile_type,
@@ -158,7 +164,7 @@ with st.expander(
                 )
 
             else:
-                st.session_state.active_profile = profile_id
+                st.session_state.active_profile = new_profile_id
                 st.rerun()
 
 
@@ -180,7 +186,7 @@ if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
 
-# 왼쪽에서 관리 대상 선택
+# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
@@ -229,7 +235,7 @@ st.subheader(f"{profile['name']}의 혈당 관리")
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 
 
-# 혈당 기록 입력
+# 혈당 입력
 with st.form(f"glucose_{selected_id}"):
     c1, c2 = st.columns(2)
 
@@ -283,7 +289,7 @@ with st.form(f"glucose_{selected_id}"):
     )
 
 
-# 혈당 기록 저장
+# 혈당 저장
 if saved:
     if glucose <= 0:
         st.warning("혈당 수치를 입력해 주세요.")
@@ -321,11 +327,21 @@ if saved:
             )
 
 
-# 기록 조회 페이지로 이동
+# 관련 페이지 이동
 st.divider()
 
-st.page_link(
-    "pages/history.py",
-    label="저장한 기록 확인·수정하러 가기",
-    icon="📈"
-)
+c1, c2 = st.columns(2)
+
+with c1:
+    st.page_link(
+        "pages/history.py",
+        label="저장한 혈당 확인·수정하기",
+        icon="📈"
+    )
+
+with c2:
+    st.page_link(
+        "pages/lifestyle.py",
+        label="식사·활동 기록하기",
+        icon="📝"
+    )
