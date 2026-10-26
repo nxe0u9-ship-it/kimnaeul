@@ -27,7 +27,7 @@ def show_error(message, error):
 def change_record(
     client, user_id, profile_id, record_id, values=None
 ):
-    # 계정·관리 대상·기록 번호가 모두 일치하는 기록만 변경한다.
+    # 계정·관리 대상·기록 번호가 일치하는 기록만 변경한다.
     table = client.table("blood_glucose")
 
     if values is None:
@@ -45,37 +45,63 @@ def change_record(
         .execute()
     )
 
-    # 실제 변경된 기록이 있어야 성공으로 처리한다.
     return bool(result.data)
 
 
-def show_record_editor(client, user, profile_id, rows):
-    records = {
-        row["record_id"]: row
-        for row in rows
-    }
-
-    def record_label(record_id):
-        row = records[record_id]
-        return (
-            f"{row['measure_date']} "
-            f"{str(row['measure_time'])[:5]} · "
-            f"{row['glucose']} mg/dL · "
-            f"{row['meal']} · {record_id[:8]}"
-        )
-
-    st.markdown("### ✏️ 기록 수정·삭제")
-
-    target_id = st.selectbox(
-        "수정하거나 삭제할 기록",
-        list(records),
-        format_func=record_label,
-        key=f"record_choice_{profile_id}"
+def show_record_editor(
+    client, user, profile_id, rows, display
+):
+    st.markdown("### ✏️ 표에서 기록 선택")
+    st.caption(
+        "표 왼쪽의 선택란을 누르면 "
+        "아래에 수정·삭제 화면이 나와요."
     )
 
-    row = records[target_id]
+    # 목록의 내용이 바뀌면 선택을 초기화한다.
+    table_revision = sha256(
+        json.dumps(
+            rows, sort_keys=True, default=str
+        ).encode()
+    ).hexdigest()[:16]
 
-    # 저장된 내용이 바뀌면 입력칸도 최신 값으로 다시 만든다.
+    event = st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"record_table_{profile_id}_{table_revision}"
+    )
+
+    positions = event["selection"]["rows"]
+
+    if not positions:
+        st.info(
+            "수정하거나 삭제할 기록 한 건을 "
+            "표에서 선택해 주세요."
+        )
+        return
+
+    # 표를 정렬해도 원본 데이터의 위치로 기록을 찾는다.
+    position = positions[0]
+
+    if not 0 <= position < len(rows):
+        st.warning(
+            "목록이 바뀌었어요. 기록을 다시 선택해 주세요."
+        )
+        return
+
+    row = rows[position]
+    target_id = row["record_id"]
+
+    st.markdown("#### 선택한 기록")
+    st.write(
+        f"{row['measure_date']} "
+        f"{str(row['measure_time'])[:5]} · "
+        f"{row['glucose']} mg/dL · {row['meal']}"
+    )
+
+    # 다른 기록을 고르거나 저장 내용이 바뀌면 입력칸을 갱신한다.
     revision = sha256(
         json.dumps(
             row, sort_keys=True, default=str
@@ -250,9 +276,7 @@ div[data-testid="stForm"] {
 
 st.sidebar.title("🩸 당당케어")
 st.sidebar.page_link(
-    "main.py",
-    label="혈당 기록",
-    icon="🩸"
+    "main.py", label="혈당 기록", icon="🩸"
 )
 
 profile_menu = st.sidebar.container()
@@ -271,7 +295,7 @@ st.caption(
     "혈당을 기록하고 이전 기록을 확인해요."
 )
 
-# 로그인한 계정의 관리 대상만 조회한다.
+# 로그인한 계정의 관리 대상만 불러온다.
 try:
     profiles = (
         client.table("care_profiles")
@@ -298,8 +322,7 @@ with st.expander("➕ 관리 대상 추가", expanded=not profiles):
 
     with st.form("add_profile", clear_on_submit=True):
         name = st.text_input(
-            "이름 또는 별명",
-            max_chars=50
+            "이름 또는 별명", max_chars=50
         )
 
         animal_type = None
@@ -390,7 +413,6 @@ profile = profile_map[selected_id]
 
 st.subheader(f"{profile['name']}의 혈당 관리")
 
-# 수정·삭제 후 새 화면에서도 완료 안내를 표시한다.
 notice = st.session_state.pop("record_notice", None)
 
 if notice and notice[:2] == (user.id, selected_id):
@@ -403,14 +425,13 @@ record_tab, history_tab = st.tabs([
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-# 새 혈당 기록 저장
+# 새 혈당 기록 입력
 with record_tab:
     with st.form(f"glucose_{selected_id}"):
         c1, c2 = st.columns(2)
 
         measure_date = c1.date_input(
-            "📅 측정 날짜",
-            value=now.date()
+            "📅 측정 날짜", value=now.date()
         )
 
         measure_time = c2.time_input(
@@ -489,7 +510,7 @@ with record_tab:
                     f"{glucose} mg/dL 기록을 저장했어요!"
                 )
 
-# 기록 조회·그래프·수정·삭제
+# 조회 조건으로 기록을 좁힌 뒤 표에서 선택한다.
 with history_tab:
     c1, c2 = st.columns(2)
 
@@ -505,6 +526,12 @@ with history_tab:
         key="history_end"
     )
 
+    meal_filter = st.selectbox(
+        "측정 시점으로 찾기",
+        ["전체"] + MEALS[1:],
+        key=f"history_meal_{selected_id}"
+    )
+
     if start > end:
         st.warning(
             "조회 시작일은 종료일보다 늦을 수 없어요."
@@ -512,7 +539,7 @@ with history_tab:
 
     else:
         try:
-            rows = (
+            query = (
                 client.table("blood_glucose")
                 .select(
                     "record_id,measure_date,measure_time,"
@@ -522,7 +549,13 @@ with history_tab:
                 .eq("profile_id", selected_id)
                 .gte("measure_date", start.isoformat())
                 .lte("measure_date", end.isoformat())
-                .order("measure_date", desc=True)
+            )
+
+            if meal_filter != "전체":
+                query = query.eq("meal", meal_filter)
+
+            rows = (
+                query.order("measure_date", desc=True)
                 .order("measure_time", desc=True)
                 .order("record_id")
                 .limit(1000)
@@ -541,15 +574,15 @@ with history_tab:
         if rows is not None:
             if not rows:
                 st.info(
-                    "선택한 기간에 저장된 기록이 없어요."
+                    "선택한 기간과 측정 시점에 "
+                    "해당하는 기록이 없어요."
                 )
 
             else:
                 df = pd.DataFrame(rows)
 
                 df["glucose"] = pd.to_numeric(
-                    df["glucose"],
-                    errors="coerce"
+                    df["glucose"], errors="coerce"
                 )
 
                 df["측정일시"] = pd.to_datetime(
@@ -566,13 +599,10 @@ with history_tab:
 
                 c1, c2 = st.columns(2)
 
-                c1.metric(
-                    "표시된 기록",
-                    f"{len(df)}개"
-                )
+                c1.metric("표시된 기록", f"{len(df)}개")
 
                 c2.metric(
-                    "가장 최근 혈당",
+                    "조회 결과의 최근 혈당",
                     f"{rows[0]['glucose']} mg/dL"
                 )
 
@@ -604,10 +634,8 @@ with history_tab:
                     }
                 )
 
-                st.dataframe(
-                    display,
-                    hide_index=True,
-                    use_container_width=True
+                show_record_editor(
+                    client, user, selected_id, rows, display
                 )
 
                 st.download_button(
@@ -615,8 +643,4 @@ with history_tab:
                     display.to_csv(index=False).encode("utf-8-sig"),
                     file_name="blood_glucose.csv",
                     mime="text/csv"
-                )
-
-                show_record_editor(
-                    client, user, selected_id, rows
                 )
