@@ -66,6 +66,12 @@ st.sidebar.page_link(
     icon="📝"
 )
 
+st.sidebar.page_link(
+    "pages/meal.py",
+    label="냉장고 식단 추천",
+    icon="🍽️"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
@@ -330,7 +336,7 @@ if saved:
 # 관련 페이지 이동
 st.divider()
 
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 
 with c1:
     st.page_link(
@@ -344,4 +350,11 @@ with c2:
         "pages/lifestyle.py",
         label="식사·활동 기록하기",
         icon="📝"
+    )
+
+with c3:
+    st.page_link(
+        "pages/meal.py",
+        label="냉장고 재료·식사 조건 입력하기",
+        icon="🍽️"
     )
