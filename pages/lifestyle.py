@@ -188,6 +188,12 @@ st.sidebar.page_link(
     icon="🔍"
 )
 
+st.sidebar.page_link(
+    "pages/visit.py",
+    label="진료 준비 노트",
+    icon="🏥"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
