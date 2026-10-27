@@ -363,18 +363,34 @@ def edit_record(client, user, profile_id, row):
         else MEALS + [original_meal]
     )
 
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    original_date = date.fromisoformat(row["measure_date"])
+
+    if original_date > today:
+        st.warning(
+            "기존 기록이 미래 날짜로 저장되어 있어요. "
+            "수정 날짜는 오늘로 표시했으니 "
+            "실제로 측정한 날짜를 선택해 주세요."
+        )
+
     with st.form(prefix):
         c1, c2 = st.columns(2)
 
         edited_date = c1.date_input(
             "측정 날짜",
-            value=date.fromisoformat(row["measure_date"])
+            value=min(original_date, today),
+            max_value=today
         )
 
         edited_time = c2.time_input(
             "측정 시간",
             value=time.fromisoformat(row["measure_time"]),
             step=60
+        )
+
+        st.caption(
+            "측정 날짜와 시간은 대한민국 기준이에요. "
+            "현재보다 미래인 시각으로 수정할 수 없어요."
         )
 
         edited_glucose = st.number_input(
@@ -409,42 +425,53 @@ def edit_record(client, user, profile_id, row):
         )
 
     if save:
-        values = {
-            "measure_date": edited_date.isoformat(),
-            "measure_time": edited_time.strftime("%H:%M"),
-            "glucose": edited_glucose,
-            "meal": edited_meal,
-            "insulin": edited_insulin,
-            "memo": edited_memo
-        }
+        measured_at = datetime.combine(
+            edited_date, edited_time
+        ).replace(tzinfo=ZoneInfo("Asia/Seoul"))
 
-        try:
-            changed = change_record(
-                client, user.id, profile_id,
-                row["record_id"], values
-            )
-
-        except Exception as error:
-            show_error(
-                "수정 결과를 확인하지 못했어요. "
-                "목록을 새로 확인해 주세요.",
-                error
+        if measured_at > datetime.now(ZoneInfo("Asia/Seoul")):
+            st.warning(
+                "측정 시각이 현재보다 미래예요. "
+                "실제로 측정한 날짜와 시간으로 바꿔 주세요."
             )
 
         else:
-            if changed:
-                st.session_state.history_notice = (
-                    user.id,
-                    profile_id,
-                    "혈당 기록을 수정했어요."
+            values = {
+                "measure_date": edited_date.isoformat(),
+                "measure_time": edited_time.strftime("%H:%M"),
+                "glucose": edited_glucose,
+                "meal": edited_meal,
+                "insulin": edited_insulin,
+                "memo": edited_memo
+            }
+
+            try:
+                changed = change_record(
+                    client, user.id, profile_id,
+                    row["record_id"], values
                 )
-                st.rerun()
+
+            except Exception as error:
+                show_error(
+                    "수정 결과를 확인하지 못했어요. "
+                    "목록을 새로 확인해 주세요.",
+                    error
+                )
 
             else:
-                st.warning(
-                    "변경된 기록이 없어요. "
-                    "기록 존재 여부와 수정 정책을 확인해 주세요."
-                )
+                if changed:
+                    st.session_state.history_notice = (
+                        user.id,
+                        profile_id,
+                        "혈당 기록을 수정했어요."
+                    )
+                    st.rerun()
+
+                else:
+                    st.warning(
+                        "변경된 기록이 없어요. "
+                        "기록 존재 여부와 수정 정책을 확인해 주세요."
+                    )
 
     with st.form(f"{prefix}_delete"):
         st.warning(
