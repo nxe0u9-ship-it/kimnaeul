@@ -244,7 +244,13 @@ div.stButton > button {
 st.sidebar.title("🩸 당당케어")
 
 st.sidebar.page_link(
-    "main.py",
+    "pages/home.py",
+    label="우리집 케어 홈",
+    icon="🏠"
+)
+
+st.sidebar.page_link(
+    "pages/record.py",
     label="혈당 기록하기",
     icon="🩸"
 )
@@ -317,7 +323,7 @@ except Exception as error:
 if not profiles:
     st.info("먼저 관리 대상을 등록해 주세요.")
     st.page_link(
-        "main.py",
+        "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
