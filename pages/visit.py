@@ -119,7 +119,8 @@ div[data-testid="stForm"] {
 st.sidebar.title("🩸 당당케어")
 
 for path, label, icon in [
-    ("main.py", "혈당 기록하기", "🩸"),
+    ("pages/home.py", "우리집 케어 홈", "🏠"),
+    ("pages/record.py", "혈당 기록하기", "🩸"),
     ("pages/history.py", "기록 확인·수정", "📈"),
     ("pages/lifestyle.py", "식사·활동 기록", "📝"),
     ("pages/meal.py", "냉장고 식단 추천", "🍽️"),
@@ -170,7 +171,7 @@ except Exception as error:
 if not profiles:
     st.info("먼저 관리 대상을 등록해 주세요.")
     st.page_link(
-        "main.py",
+        "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
@@ -426,8 +427,7 @@ if save:
         except Exception as error:
             show_error(
                 "저장 결과를 확인하지 못했어요. "
-                "ページ를 다시 열어 노트 목록을 확인해 주세요."
-                .replace("ページ", "페이지"),
+                "페이지를 다시 열어 노트 목록을 확인해 주세요.",
                 error
             )
 
