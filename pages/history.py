@@ -201,8 +201,9 @@ def show_graph(rows, scope, selectable):
     label_mode = st.radio(
         "그래프 수치 표시",
         ["자동", "모두 표시", "숨기기"],
+        index=2,
         horizontal=True,
-        key=f"history_labels_{scope}"
+        key=f"history_labels_v2_{scope}"
     )
 
     count = len(chart)
@@ -257,7 +258,11 @@ def show_graph(rows, scope, selectable):
         go.Scatter(
             x=chart["measured_at"],
             y=chart["glucose"],
-            mode="lines+markers+text",
+            mode=(
+                "lines+markers"
+                if label_mode == "숨기기"
+                else "lines+markers+text"
+            ),
             text=labels,
             textposition="top center",
             textfont={"size": 13},
@@ -321,7 +326,14 @@ def show_graph(rows, scope, selectable):
         uirevision=f"history_{scope}_{fingerprint(rows)}"
     )
 
-    if label_mode == "자동":
+    if label_mode == "숨기기":
+        st.caption(
+            "점에 마우스를 올리면 혈당값·측정 시각·메모를 "
+            "확인할 수 있어요. 숫자를 항상 보려면 "
+            "‘자동’ 또는 ‘모두 표시’를 선택해 주세요."
+        )
+
+    elif label_mode == "자동":
         st.caption(
             "기록이 많으면 일부 점에만 수치를 표시해요. "
             "모든 값은 아래 표에서도 확인할 수 있어요."
