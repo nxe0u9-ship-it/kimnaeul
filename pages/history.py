@@ -61,6 +61,34 @@ def show_error(message, error):
     )
 
 
+def show_meal_legend():
+    items = []
+
+    for meal, color in MEAL_COLORS.items():
+        label = "기타·미분류" if meal == "기타" else meal
+
+        items.append(
+            '<span style="display:inline-flex;'
+            'align-items:center;gap:7px;white-space:nowrap;">'
+            f'<span aria-hidden="true" style="display:inline-block;'
+            f'width:11px;height:11px;border-radius:50%;'
+            f'background-color:{color};"></span>'
+            f'<span>{escape(label)}</span>'
+            '</span>'
+        )
+
+    st.markdown(
+        '<div style="display:flex;flex-wrap:wrap;'
+        'gap:10px 20px;padding:12px 16px;'
+        'background-color:#FFFFFF;border:1px solid #E2E8F0;'
+        'border-radius:12px;font-size:14px;color:#334155;">'
+        '<span style="font-weight:600;">점 색상 · 측정 시점</span>'
+        + "".join(items)
+        + '</div>',
+        unsafe_allow_html=True
+    )
+
+
 def display_records(rows):
     return (
         pd.DataFrame(rows)
@@ -351,6 +379,7 @@ def show_graph(rows, scope, selectable):
             use_container_width=True,
             key=graph_key
         )
+        show_meal_legend()
         return None
 
     st.caption(
@@ -365,6 +394,8 @@ def show_graph(rows, scope, selectable):
         on_select="rerun",
         selection_mode="points"
     )
+
+    show_meal_legend()
 
     points = event["selection"]["points"]
 
