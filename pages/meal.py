@@ -58,7 +58,6 @@ def clean_ingredients(rows):
             else str(raw_unit).strip()
         )
 
-        # 이름과 양이 모두 비어 있는 행은 건너뛴다.
         if not name and amount is None:
             continue
 
@@ -126,7 +125,13 @@ div[data-testid="stForm"] {
 st.sidebar.title("🩸 당당케어")
 
 st.sidebar.page_link(
-    "main.py",
+    "pages/home.py",
+    label="우리집 케어 홈",
+    icon="🏠"
+)
+
+st.sidebar.page_link(
+    "pages/record.py",
     label="혈당 기록하기",
     icon="🩸"
 )
@@ -205,7 +210,7 @@ if not profiles:
         "관리 대상을 등록해 주세요."
     )
     st.page_link(
-        "main.py",
+        "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
@@ -447,7 +452,6 @@ with st.form(form_key):
 # 입력 검증과 저장
 if save_clicked:
     try:
-        # 표의 빈 값을 JSON으로 저장 가능한 None으로 바꾼다.
         clean_df = edited_ingredients.astype(object).where(
             pd.notna(edited_ingredients),
             None
