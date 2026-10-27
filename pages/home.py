@@ -187,6 +187,19 @@ c1.metric("등록된 관리 대상", str(len(profiles)))
 c2.metric("사람", f"{people_count}명")
 c3.metric("반려동물", f"{pet_count}마리")
 
+
+# 관리 대상 추가 바로가기
+st.page_link(
+    "pages/record.py",
+    label="관리 대상 추가하러 가기",
+    icon="➕"
+)
+
+st.caption(
+    "혈당 기록 페이지 위쪽의 ‘관리 대상 추가’를 펼쳐 "
+    "나와 가족, 반려동물을 등록할 수 있어요."
+)
+
 if st.button("🔄 최신 기록 다시 불러오기"):
     st.rerun()
 
