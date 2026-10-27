@@ -41,6 +41,12 @@ st.sidebar.page_link(
     icon="📝"
 )
 
+st.sidebar.page_link(
+    "pages/meal.py",
+    label="냉장고 식단 추천",
+    icon="🍽️"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
