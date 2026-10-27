@@ -138,6 +138,83 @@ def load_linked_records(client, user_id, profile_id, linked_ids):
     )
 
 
+# 기록 확인 페이지 등에서 사용하는 조회 전용 화면
+def show_linked_records(client, user_id, profile_id, glucose_id):
+    st.markdown("**🔗 이 혈당에 연결된 식사·활동**")
+
+    try:
+        blood_rows = (
+            client.table("blood_glucose")
+            .select("record_id")
+            .eq("user_id", user_id)
+            .eq("profile_id", profile_id)
+            .eq("record_id", glucose_id)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+
+        if not blood_rows:
+            st.info(
+                "해당 혈당 기록을 확인할 수 없어요. "
+                "혈당 목록을 다시 불러와 주세요."
+            )
+            return
+
+        linked_ids = load_link_ids(
+            client,
+            user_id,
+            profile_id,
+            glucose_id
+        )
+
+        linked_rows = load_linked_records(
+            client,
+            user_id,
+            profile_id,
+            linked_ids
+        )
+
+    except Exception as error:
+        show_error(
+            "연결된 식사·활동을 불러오지 못했어요.",
+            error
+        )
+        return
+
+    if not linked_rows:
+        st.info(
+            "이 혈당에 연결된 식사·활동 기록이 없어요. "
+            "혈당 기록하기 페이지에서 관련 기록을 연결할 수 있어요."
+        )
+
+    else:
+        st.caption(f"연결된 식사·활동 {len(linked_rows)}건")
+
+        st.dataframe(
+            lifestyle_table(linked_rows),
+            hide_index=True,
+            use_container_width=True
+        )
+
+    if len(linked_rows) < len(linked_ids):
+        st.caption(
+            "연결 목록 중 현재 확인할 수 없는 기록이 있어요. "
+            "목록을 다시 불러와 주세요."
+        )
+
+    st.caption(
+        "연결된 내용은 현재 저장된 식사·활동 기록을 보여줘요. "
+        "연결은 혈당 변화의 원인을 의미하지 않아요."
+    )
+
+    st.page_link(
+        "pages/record.py",
+        label="식사·활동 연결 추가·해제하기",
+        icon="🔗"
+    )
+
+
 def show_record_links(client, user_id, profile_id):
     scope = f"{user_id}_{profile_id}"
     today = datetime.now(ZoneInfo("Asia/Seoul")).date()
