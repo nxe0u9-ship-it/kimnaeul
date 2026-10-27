@@ -139,6 +139,15 @@ with st.expander(
         horizontal=True
     )
 
+    # 선택 즉시 직접 입력란이 나타나도록 양식 밖에 배치한다.
+    animal_choice = None
+
+    if profile_type == "반려동물":
+        animal_choice = st.selectbox(
+            "동물 종류",
+            ["강아지", "고양이", "기타"]
+        )
+
     with st.form(
         "add_profile",
         clear_on_submit=True
@@ -148,12 +157,13 @@ with st.expander(
             max_chars=50
         )
 
-        animal_type = None
+        custom_animal = ""
 
-        if profile_type == "반려동물":
-            animal_type = st.selectbox(
-                "동물 종류",
-                ["강아지", "고양이", "기타"]
+        if animal_choice == "기타":
+            custom_animal = st.text_input(
+                "동물 종류 직접 입력",
+                placeholder="예: 토끼, 햄스터, 기니피그",
+                max_chars=50
             )
 
         added = st.form_submit_button(
@@ -165,7 +175,19 @@ with st.expander(
         if not name.strip():
             st.warning("이름 또는 별명을 입력해 주세요.")
 
+        elif animal_choice == "기타" and not custom_animal.strip():
+            st.warning("동물 종류를 직접 입력해 주세요.")
+
         else:
+            animal_type = None
+
+            if profile_type == "반려동물":
+                animal_type = (
+                    custom_animal.strip()
+                    if animal_choice == "기타"
+                    else animal_choice
+                )
+
             new_profile_id = str(uuid4())
 
             try:
@@ -196,7 +218,7 @@ if not profiles:
     profile_menu.caption("등록된 관리 대상이 없어요.")
     st.info(
         "먼저 위에서 관리 대상을 등록해 주세요. "
-        "사람과 반려동물을 여러 명 등록할 수 있어요."
+        "사람과 반려동물을 함께 등록할 수 있어요."
     )
     st.stop()
 
