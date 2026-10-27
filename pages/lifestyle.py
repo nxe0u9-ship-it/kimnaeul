@@ -54,8 +54,8 @@ def base_query(client, user_id, profile_id):
 def check_activity_conflict(
     client, user_id, profile_id, record_date, record_type
 ):
-    #  같은 날짜에 활동 기록과 '활동 없음'이
-    #  함께 저장되는 것을 앱에서 확인한다.
+    # 같은 날짜에 활동 기록과 '활동 없음'이
+    # 함께 저장되는 것을 앱에서 확인한다.
     opposite = {
         "activity": "no_activity",
         "no_activity": "activity"
@@ -102,7 +102,9 @@ def display_records(rows):
                 + "T"
                 + row["record_time"]
             )
-            ended = started + timedelta(minutes=int(duration))
+            ended = started + timedelta(
+                minutes=int(duration)
+            )
             end_text = ended.strftime("%Y-%m-%d %H:%M")
 
         result.append({
@@ -117,7 +119,9 @@ def display_records(rows):
                 else ""
             ),
             "지속 시간(분)": (
-                int(duration) if duration is not None else None
+                int(duration)
+                if duration is not None
+                else None
             ),
             "강도": row.get("intensity") or "",
             "수면 종료": end_text,
@@ -172,6 +176,12 @@ st.sidebar.page_link(
     icon="📝"
 )
 
+st.sidebar.page_link(
+    "pages/meal.py",
+    label="냉장고 식단 추천",
+    icon="🍽️"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
@@ -180,10 +190,12 @@ st.sidebar.page_link(
     icon="💬"
 )
 
+
+# 로그인 확인
 client, user = require_login()
 
 
-# 관리 대상
+# 관리 대상 불러오기
 try:
     profiles = (
         client.table("care_profiles")
@@ -195,11 +207,16 @@ try:
     ) or []
 
 except Exception as error:
-    show_error("관리 대상을 불러오지 못했어요.", error)
+    show_error(
+        "관리 대상을 불러오지 못했어요.",
+        error
+    )
     st.stop()
 
 if not profiles:
-    st.info("먼저 혈당 기록하기에서 관리 대상을 등록해 주세요.")
+    st.info(
+        "먼저 혈당 기록하기에서 관리 대상을 등록해 주세요."
+    )
     st.page_link(
         "main.py",
         label="관리 대상 등록하러 가기",
@@ -207,23 +224,41 @@ if not profiles:
     )
     st.stop()
 
-profile_map = {item["id"]: item for item in profiles}
+profile_map = {
+    item["id"]: item
+    for item in profiles
+}
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
+
+# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
     for item in profiles:
-        icon = "👤" if item["profile_type"] == "사람" else "🐾"
-        kind = item.get("animal_type") or item["profile_type"]
+        icon = (
+            "👤"
+            if item["profile_type"] == "사람"
+            else "🐾"
+        )
+        kind = (
+            item.get("animal_type")
+            or item["profile_type"]
+        )
         label = f"{icon} {item['name']} · {kind}"
 
-        if sum(p["name"] == item["name"] for p in profiles) > 1:
+        if sum(
+            p["name"] == item["name"]
+            for p in profiles
+        ) > 1:
             label += f" · {item['id'][:8]}"
 
-        active = item["id"] == st.session_state.active_profile
+        active = (
+            item["id"]
+            == st.session_state.active_profile
+        )
 
         if st.button(
             label,
@@ -234,13 +269,17 @@ with profile_menu:
             st.session_state.active_profile = item["id"]
             st.rerun()
 
+
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
 scope = f"{user.id}_{profile_id}"
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 today = now.date()
-clock = now.time().replace(second=0, microsecond=0)
+clock = now.time().replace(
+    second=0,
+    microsecond=0
+)
 
 st.title("📝 식사·활동 기록")
 st.caption(
@@ -275,6 +314,7 @@ if record_type == "meal":
         "같은 식사에서 먹은 음식을 음식별로 입력해요. "
         "섭취량은 실제 먹은 양을 적어 주세요."
     )
+
     food_count = st.number_input(
         "입력할 음식 개수",
         min_value=1,
@@ -288,13 +328,18 @@ elif record_type == "activity":
     activities = (
         ["산책", "실내 놀이", "달리기", "기타"]
         if is_pet
-        else ["걷기", "달리기", "자전거", "근력 운동", "수영", "기타"]
+        else [
+            "걷기", "달리기", "자전거",
+            "근력 운동", "수영", "기타"
+        ]
     )
+
     activity_name = st.selectbox(
         "활동 종류",
         activities,
         key=f"activity_kind_{scope}"
     )
+
     st.caption(
         "시작 시각과 지속 시간을 입력해요. "
         "자정을 넘긴 활동은 날짜별로 나눠 기록해 주세요."
@@ -313,17 +358,23 @@ else:
     )
 
 
-# 성공 후 입력 양식을 새로 만드는 번호
+# 저장 성공 후 입력 양식을 새로 만드는 번호
 revision_key = f"lifestyle_form_revision_{scope}"
 revision = st.session_state.get(revision_key, 0)
-form_key = f"lifestyle_form_{scope}_{record_type}_{revision}"
 
+form_key = (
+    f"lifestyle_form_{scope}_{record_type}_{revision}"
+)
+
+
+# 기록 입력
 with st.form(form_key):
     default_date = (
         today - timedelta(days=1)
         if record_type in ["sleep", "no_activity"]
         else today
     )
+
     latest_date = (
         today - timedelta(days=1)
         if record_type == "no_activity"
@@ -331,7 +382,9 @@ with st.form(form_key):
     )
 
     record_date = st.date_input(
-        "잠든 날짜" if record_type == "sleep" else "기록 날짜",
+        "잠든 날짜"
+        if record_type == "sleep"
+        else "기록 날짜",
         value=default_date,
         max_value=latest_date
     )
@@ -340,8 +393,14 @@ with st.form(form_key):
 
     if record_type != "no_activity":
         record_time = st.time_input(
-            "잠든 시간" if record_type == "sleep" else "시작·섭취 시간",
-            value=time(23, 0) if record_type == "sleep" else clock,
+            "잠든 시간"
+            if record_type == "sleep"
+            else "시작·섭취 시간",
+            value=(
+                time(23, 0)
+                if record_type == "sleep"
+                else clock
+            ),
             step=60
         )
 
@@ -369,6 +428,7 @@ with st.form(form_key):
                 key=f"{form_key}_food_{index}",
                 placeholder="예: 현미밥 또는 사료 제품명"
             )
+
             amount = c2.number_input(
                 "먹은 양",
                 min_value=0.0,
@@ -376,6 +436,7 @@ with st.form(form_key):
                 step=0.5,
                 key=f"{form_key}_amount_{index}"
             )
+
             unit = c3.selectbox(
                 "단위",
                 UNITS,
@@ -400,6 +461,7 @@ with st.form(form_key):
             value=20,
             step=1
         )
+
         intensity = st.selectbox(
             "느낀 활동 강도",
             ["가벼움", "보통", "높음"]
@@ -411,6 +473,7 @@ with st.form(form_key):
             value=today,
             max_value=today
         )
+
         wake_time = st.time_input(
             "일어난 시간",
             value=time(7, 0),
@@ -419,7 +482,8 @@ with st.form(form_key):
 
     else:
         confirmed = st.checkbox(
-            "이 날짜에 따로 기록할 운동·산책 활동이 없었음을 확인했어요."
+            "이 날짜에 따로 기록할 운동·산책 활동이 "
+            "없었음을 확인했어요."
         )
 
     memo = st.text_area(
@@ -453,8 +517,10 @@ if submitted:
 
         if record_time is not None:
             started = datetime.combine(
-                record_date, record_time
+                record_date,
+                record_time
             )
+
             if started > now.replace(tzinfo=None):
                 raise ValueError(
                     "아직 지나지 않은 시각은 기록할 수 없어요."
@@ -466,7 +532,8 @@ if submitted:
                 for name, amount, unit in foods
             ):
                 raise ValueError(
-                    "모든 음식의 이름과 0보다 큰 섭취량을 입력해 주세요."
+                    "모든 음식의 이름과 "
+                    "0보다 큰 섭취량을 입력해 주세요."
                 )
 
             payload = [
@@ -490,7 +557,9 @@ if submitted:
             if not name:
                 raise ValueError("활동명을 입력해 주세요.")
 
-            ended = started + timedelta(minutes=int(duration))
+            ended = started + timedelta(
+                minutes=int(duration)
+            )
 
             if ended > now.replace(tzinfo=None):
                 raise ValueError(
@@ -515,7 +584,11 @@ if submitted:
             }]
 
         elif record_type == "sleep":
-            ended = datetime.combine(wake_date, wake_time)
+            ended = datetime.combine(
+                wake_date,
+                wake_time
+            )
+
             minutes = int(
                 (ended - started).total_seconds() // 60
             )
@@ -538,7 +611,9 @@ if submitted:
 
         else:
             if not confirmed:
-                raise ValueError("활동 없음 확인란을 체크해 주세요.")
+                raise ValueError(
+                    "활동 없음 확인란을 체크해 주세요."
+                )
 
             if record_date >= today:
                 raise ValueError(
@@ -551,8 +626,11 @@ if submitted:
             }]
 
         check_activity_conflict(
-            client, user.id, profile_id,
-            record_date.isoformat(), record_type
+            client,
+            user.id,
+            profile_id,
+            record_date.isoformat(),
+            record_type
         )
 
         client.table("lifestyle_records").insert(
@@ -569,6 +647,7 @@ if submitted:
                 "이미 같은 날짜의 활동 없음 확인이 저장되어 있어요. "
                 "아래 목록을 확인해 주세요."
             )
+
         else:
             show_error(
                 "저장 결과를 확인하지 못했어요. "
@@ -578,11 +657,13 @@ if submitted:
 
     else:
         st.session_state[revision_key] = revision + 1
+
         st.session_state.lifestyle_notice = (
             user.id,
             profile_id,
             f"{len(payload)}건의 기록을 저장했어요."
         )
+
         st.rerun()
 
 
@@ -597,6 +678,7 @@ start = c1.date_input(
     value=today - timedelta(days=6),
     key=f"lifestyle_start_{scope}"
 )
+
 end = c2.date_input(
     "조회 종료일",
     value=today,
@@ -622,10 +704,15 @@ try:
 
     if kind_filter != "전체":
         filter_code = next(
-            code for code, label in TYPE_LABELS.items()
+            code
+            for code, label in TYPE_LABELS.items()
             if label == kind_filter
         )
-        query = query.eq("record_type", filter_code)
+
+        query = query.eq(
+            "record_type",
+            filter_code
+        )
 
     rows = (
         query.order("record_date", desc=True)
@@ -637,7 +724,10 @@ try:
     ) or []
 
 except Exception as error:
-    show_error("기록을 불러오지 못했어요.", error)
+    show_error(
+        "기록을 불러오지 못했어요.",
+        error
+    )
     st.stop()
 
 if not rows:
@@ -679,6 +769,7 @@ if positions and 0 <= positions[0] < len(rows):
     row = rows[positions[0]]
 
     st.markdown("### 선택한 기록")
+
     st.write(
         f"{row['record_date']} "
         f"{str(row.get('record_time') or '')[:5]} · "
@@ -698,16 +789,20 @@ if positions and 0 <= positions[0] < len(rows):
             "선택한 한 행을 삭제해요. "
             "삭제한 기록은 앱에서 복구할 수 없어요."
         )
+
         confirm_delete = st.checkbox(
             "선택한 기록의 삭제를 확인했어요."
         )
+
         delete_clicked = st.form_submit_button(
             "🗑️ 선택한 기록 삭제"
         )
 
     if delete_clicked:
         if not confirm_delete:
-            st.warning("삭제 확인란을 먼저 체크해 주세요.")
+            st.warning(
+                "삭제 확인란을 먼저 체크해 주세요."
+            )
 
         else:
             try:
@@ -735,6 +830,7 @@ if positions and 0 <= positions[0] < len(rows):
                         "선택한 기록을 삭제했어요."
                     )
                     st.rerun()
+
                 else:
                     st.warning(
                         "삭제된 기록이 없어요. "
