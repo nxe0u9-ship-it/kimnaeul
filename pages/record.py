@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from app_shared import require_login
+from record_links import show_record_links
 
 
 MEALS = [
@@ -552,6 +553,14 @@ else:
             "아직 저장된 혈당 기록이 없어요. "
             "위에서 첫 기록을 입력해 주세요."
         )
+
+
+# 혈당과 식사·활동 연결
+show_record_links(
+    client=client,
+    user_id=user.id,
+    profile_id=selected_id
+)
 
 
 # 관련 페이지 이동
