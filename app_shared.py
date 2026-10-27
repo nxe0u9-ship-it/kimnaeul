@@ -43,16 +43,22 @@ def get_client():
 # 공통 왼쪽 메뉴
 def show_menu():
     st.sidebar.title("🩸 당당케어")
-    st.sidebar.page_link(
-        "main.py",
-        label="혈당 기록",
-        icon="🩸"
-    )
-    st.sidebar.page_link(
-        "pages/chat.py",
-        label="AI에게 물어보기",
-        icon="💬"
-    )
+
+    for path, label, icon in [
+        ("pages/home.py", "우리집 케어 홈", "🏠"),
+        ("pages/record.py", "혈당 기록하기", "🩸"),
+        ("pages/history.py", "기록 확인·수정", "📈"),
+        ("pages/lifestyle.py", "식사·활동 기록", "📝"),
+        ("pages/meal.py", "냉장고 식단 추천", "🍽️"),
+        ("pages/explore.py", "내 기록 탐구실", "🔍"),
+        ("pages/visit.py", "진료 준비 노트", "🏥"),
+        ("pages/chat.py", "AI에게 물어보기", "💬")
+    ]:
+        st.sidebar.page_link(
+            path,
+            label=label,
+            icon=icon
+        )
 
 
 # 첫 로그인 후 회원가입 완료 안내
