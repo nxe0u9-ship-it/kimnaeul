@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app_shared import require_login
+from record_links import show_linked_records
 
 
 MEALS = [
@@ -1015,6 +1016,54 @@ if editing and selected is not None:
         user,
         profile_id,
         selected
+    )
+
+
+# 혈당에 연결된 식사·활동 조회
+st.divider()
+
+with st.expander("🔗 혈당에 연결된 식사·활동 보기"):
+    st.caption(
+        "현재 조회된 혈당 중 한 건을 선택해 "
+        "연결된 식사·활동을 확인해요. "
+        "기록 수정 모드를 켜지 않아도 이용할 수 있어요."
+    )
+
+    related_map = {
+        str(row["record_id"]): row
+        for row in rows
+    }
+
+    related_choice_key = f"history_related_choice_{scope}"
+
+    if st.session_state.get(related_choice_key) not in related_map:
+        st.session_state[related_choice_key] = next(iter(related_map))
+
+    def related_blood_label(record_id):
+        row = related_map[record_id]
+
+        return (
+            f"{row['measure_date']} "
+            f"{str(row['measure_time'])[:5]} · "
+            f"{row['glucose']} mg/dL · "
+            f"{row.get('meal') or '미입력'} · "
+            f"{record_id[:8]}"
+        )
+
+    related_choice = st.selectbox(
+        "관련 식사·활동을 확인할 혈당",
+        list(related_map),
+        format_func=related_blood_label,
+        key=related_choice_key
+    )
+
+    related_blood = related_map[related_choice]
+
+    show_linked_records(
+        client=client,
+        user_id=user.id,
+        profile_id=profile_id,
+        glucose_id=related_blood["record_id"]
     )
 
 
