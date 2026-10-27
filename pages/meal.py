@@ -149,6 +149,12 @@ st.sidebar.page_link(
     icon="🍽️"
 )
 
+st.sidebar.page_link(
+    "pages/explore.py",
+    label="내 기록 탐구실",
+    icon="🔍"
+)
+
 profile_menu = st.sidebar.container()
 
 st.sidebar.page_link(
