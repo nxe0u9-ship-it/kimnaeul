@@ -248,25 +248,35 @@ st.sidebar.page_link(
     label="혈당 기록하기",
     icon="🩸"
 )
+
 st.sidebar.page_link(
     "pages/history.py",
     label="기록 확인·수정",
     icon="📈"
 )
+
 st.sidebar.page_link(
     "pages/lifestyle.py",
     label="식사·활동 기록",
     icon="📝"
 )
+
 st.sidebar.page_link(
     "pages/meal.py",
     label="냉장고 식단 추천",
     icon="🍽️"
 )
+
 st.sidebar.page_link(
     "pages/explore.py",
     label="내 기록 탐구실",
     icon="🔍"
+)
+
+st.sidebar.page_link(
+    "pages/visit.py",
+    label="진료 준비 노트",
+    icon="🏥"
 )
 
 profile_menu = st.sidebar.container()
@@ -372,6 +382,7 @@ start = c1.date_input(
     value=today - timedelta(days=29),
     key=f"explore_start_{scope}"
 )
+
 end = c2.date_input(
     "조회 종료일",
     value=today,
@@ -430,6 +441,7 @@ c1.metric(
     "조회한 혈당 기록",
     f"{len(glucose_rows)}건"
 )
+
 c2.metric(
     "조회한 식사·활동 기록",
     f"{len(lifestyle_rows)}건"
