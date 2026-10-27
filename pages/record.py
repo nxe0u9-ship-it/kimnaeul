@@ -388,6 +388,63 @@ if saved:
             st.rerun()
 
 
+# 선택한 대상의 최근 혈당 기록
+st.divider()
+st.subheader(f"📋 {profile['name']}의 최근 혈당 기록")
+st.caption(
+    "측정 날짜·시간이 최신인 순서로 최대 3건을 표시해요."
+)
+
+try:
+    recent_rows = (
+        client.table("blood_glucose")
+        .select(
+            "record_id,measure_date,measure_time,"
+            "glucose,meal,insulin,memo"
+        )
+        .eq("user_id", user.id)
+        .eq("profile_id", selected_id)
+        .order("measure_date", desc=True)
+        .order("measure_time", desc=True)
+        .order("record_id")
+        .limit(3)
+        .execute()
+        .data
+    ) or []
+
+except Exception as error:
+    show_error(
+        "최근 혈당 기록을 불러오지 못했어요.",
+        error
+    )
+
+else:
+    if recent_rows:
+        recent_table = [
+            {
+                "측정 날짜": row["measure_date"],
+                "측정 시간": str(row["measure_time"])[:5],
+                "혈당 (mg/dL)": row["glucose"],
+                "측정 시점": row.get("meal") or "미입력",
+                "인슐린 (단위)": row.get("insulin"),
+                "메모": row.get("memo") or ""
+            }
+            for row in recent_rows
+        ]
+
+        st.dataframe(
+            recent_table,
+            hide_index=True,
+            use_container_width=True
+        )
+
+    else:
+        st.info(
+            "아직 저장된 혈당 기록이 없어요. "
+            "위에서 첫 기록을 입력해 주세요."
+        )
+
+
 # 관련 페이지 이동
 st.divider()
 
