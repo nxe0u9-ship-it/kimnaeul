@@ -266,7 +266,10 @@ def show_graph(rows, scope, selectable):
                 "size": 10,
                 "color": point_colors
             },
-            line={"width": 2, "color": "#DC617E"},
+            line={
+                "width": 1.5,
+                "color": "#CBD5E1"
+            },
             customdata=chart[["record_id"]].values.tolist(),
             hovertext=[
                 escape(
