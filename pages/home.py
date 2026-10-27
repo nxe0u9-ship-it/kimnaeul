@@ -61,7 +61,7 @@ st.sidebar.title("🩸 당당케어")
 
 for path, label, icon in [
     ("pages/home.py", "우리집 케어 홈", "🏠"),
-    ("main.py", "혈당 기록하기", "🩸"),
+    ("pages/record.py", "혈당 기록하기", "🩸"),
     ("pages/history.py", "기록 확인·수정", "📈"),
     ("pages/lifestyle.py", "식사·활동 기록", "📝"),
     ("pages/meal.py", "냉장고 식단 추천", "🍽️"),
@@ -118,7 +118,7 @@ if not profiles:
         "먼저 나와 가족, 반려동물을 등록해 주세요."
     )
     st.page_link(
-        "main.py",
+        "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
@@ -308,7 +308,10 @@ for item in profiles:
             key=f"home_blood_{user.id}_{profile_id}",
             use_container_width=True
         ):
-            move_to_profile(profile_id, "main.py")
+            move_to_profile(
+                profile_id,
+                "pages/record.py"
+            )
 
         if c2.button(
             "📈 기록 확인",
