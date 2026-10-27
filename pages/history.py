@@ -3,6 +3,7 @@ from hashlib import sha256
 from html import escape
 from zoneinfo import ZoneInfo
 import json
+import re
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -32,6 +33,15 @@ def fingerprint(value):
             value, sort_keys=True, default=str
         ).encode()
     ).hexdigest()[:16]
+
+
+def safe_filename_part(value):
+    cleaned = re.sub(
+        r"[^\w.-]+",
+        "_",
+        str(value).strip()
+    )
+    return cleaned.strip("._-")[:60] or "profile"
 
 
 def show_error(message, error):
@@ -928,12 +938,23 @@ if editing and selected is not None:
 
 
 # CSV 다운로드
+filename_profile = safe_filename_part(profile["name"])
+
+download_filename = (
+    f"blood_glucose_{filename_profile}_"
+    f"{start:%Y%m%d}_{end:%Y%m%d}.csv"
+)
+
+st.caption(
+    f"다운로드 파일명: {download_filename}"
+)
+
 st.download_button(
     "📥 표시된 기록 CSV 다운로드",
     data=display_records(rows).to_csv(
         index=False
     ).encode("utf-8-sig"),
-    file_name="blood_glucose.csv",
+    file_name=download_filename,
     mime="text/csv",
     key=f"history_download_{scope}"
 )
