@@ -194,7 +194,6 @@ def show_graph(rows, scope, selectable):
         )
         labels.append(f"{value:g}" if visible else "")
 
-    # 날짜·시간 눈금은 최대 약 8개만 표시한다.
     unique_times = (
         chart["measured_at"].drop_duplicates().tolist()
     )
@@ -209,7 +208,6 @@ def show_graph(rows, scope, selectable):
         f"{fingerprint(rows)}"
     )
 
-    # 이전 선택을 읽어 선택한 점을 강조한다.
     previous = st.session_state.get(graph_key, {})
     previous_points = previous.get(
         "selection", {}
@@ -525,7 +523,13 @@ div[data-testid="stForm"] {
 st.sidebar.title("🩸 당당케어")
 
 st.sidebar.page_link(
-    "main.py",
+    "pages/home.py",
+    label="우리집 케어 홈",
+    icon="🏠"
+)
+
+st.sidebar.page_link(
+    "pages/record.py",
     label="혈당 기록하기",
     icon="🩸"
 )
@@ -600,7 +604,7 @@ if not profiles:
         "관리 대상을 등록해 주세요."
     )
     st.page_link(
-        "main.py",
+        "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
