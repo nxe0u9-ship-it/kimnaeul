@@ -17,6 +17,15 @@ MEALS = [
     "식후 2시간", "취침 전", "기타"
 ]
 
+MEAL_COLORS = {
+    "공복": "#9333EA",
+    "식전": "#2563EB",
+    "식후 1시간": "#EA580C",
+    "식후 2시간": "#059669",
+    "취침 전": "#3730A3",
+    "기타": "#64748B"
+}
+
 COLUMN_NAMES = {
     "measure_date": "측정 날짜",
     "measure_time": "측정 시간",
@@ -182,6 +191,13 @@ def show_graph(rows, scope, selectable):
         st.info("그래프에 표시할 기록이 없어요.")
         return None
 
+    point_colors = (
+        chart["meal"]
+        .map(MEAL_COLORS)
+        .fillna(MEAL_COLORS["기타"])
+        .tolist()
+    )
+
     label_mode = st.radio(
         "그래프 수치 표시",
         ["자동", "모두 표시", "숨기기"],
@@ -246,7 +262,10 @@ def show_graph(rows, scope, selectable):
             textposition="top center",
             textfont={"size": 13},
             cliponaxis=False,
-            marker={"size": 10, "color": "#DC617E"},
+            marker={
+                "size": 10,
+                "color": point_colors
+            },
             line={"width": 2, "color": "#DC617E"},
             customdata=chart[["record_id"]].values.tolist(),
             hovertext=[
