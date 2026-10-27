@@ -282,6 +282,18 @@ def show_graph(rows, scope, selectable):
         if str(record_id) in selected_ids
     ]
 
+    selected_position_set = set(selected_positions)
+
+    border_colors = [
+        "#0F172A" if i in selected_position_set else "#FFFFFF"
+        for i in range(len(chart))
+    ]
+
+    border_widths = [
+        3 if i in selected_position_set else 1
+        for i in range(len(chart))
+    ]
+
     fig = go.Figure(
         go.Scatter(
             x=chart["measured_at"],
@@ -297,7 +309,11 @@ def show_graph(rows, scope, selectable):
             cliponaxis=False,
             marker={
                 "size": 10,
-                "color": point_colors
+                "color": point_colors,
+                "line": {
+                    "color": border_colors,
+                    "width": border_widths
+                }
             },
             line={
                 "width": 1.5,
@@ -319,8 +335,7 @@ def show_graph(rows, scope, selectable):
             selectedpoints=selected_positions or None,
             selected={
                 "marker": {
-                    "size": 17,
-                    "color": "#6D48C5"
+                    "size": 17
                 }
             },
             unselected={"marker": {"opacity": 0.65}}
@@ -384,6 +399,7 @@ def show_graph(rows, scope, selectable):
 
     st.caption(
         "수정할 점을 한 개 눌러 주세요. "
+        "선택한 점은 크게 표시되고 진한 테두리가 생겨요. "
         "겹친 점은 검색이나 표에서 선택할 수 있어요."
     )
 
