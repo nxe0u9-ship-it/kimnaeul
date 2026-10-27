@@ -139,7 +139,6 @@ with st.expander(
         horizontal=True
     )
 
-    # 선택 즉시 직접 입력란이 나타나도록 양식 밖에 배치한다.
     animal_choice = None
 
     if profile_type == "반려동물":
@@ -262,11 +261,7 @@ with profile_menu:
         if st.button(
             label,
             key=f"choose_profile_{item['id']}",
-            type=(
-                "primary"
-                if is_selected
-                else "secondary"
-            ),
+            type="primary" if is_selected else "secondary",
             use_container_width=True
         ):
             st.session_state.active_profile = item["id"]
@@ -292,10 +287,108 @@ notice = st.session_state.pop(notice_key, None)
 if notice:
     st.success(notice)
 
-form_key = f"glucose_{scope}_{revision}"
+profile_notice_key = f"profile_edit_notice_{scope}"
+profile_notice = st.session_state.pop(profile_notice_key, None)
+
+if profile_notice:
+    st.success(profile_notice)
+
+
+# 등록된 반려동물 종류 수정
+if profile["profile_type"] == "반려동물":
+    current_animal = profile.get("animal_type") or ""
+    animal_options = ["강아지", "고양이", "기타"]
+
+    edit_version = f"{scope}_{current_animal}"
+
+    with st.expander("🐾 동물 종류 수정"):
+        st.caption(
+            f"수정할 대상: {profile['name']} · "
+            f"현재 종류: {current_animal or '미입력'}"
+        )
+
+        edit_animal_choice = st.selectbox(
+            "변경할 동물 종류",
+            animal_options,
+            index=(
+                animal_options.index(current_animal)
+                if current_animal in ["강아지", "고양이"]
+                else 2
+            ),
+            key=f"edit_animal_choice_{edit_version}"
+        )
+
+        with st.form(f"edit_animal_form_{edit_version}"):
+            edit_custom_animal = ""
+
+            if edit_animal_choice == "기타":
+                edit_custom_animal = st.text_input(
+                    "변경할 동물 종류 직접 입력",
+                    value=(
+                        current_animal
+                        if current_animal not in animal_options
+                        else ""
+                    ),
+                    placeholder="예: 토끼, 햄스터, 기니피그",
+                    max_chars=50
+                )
+
+            update_animal = st.form_submit_button(
+                "💾 동물 종류 수정 저장",
+                use_container_width=True
+            )
+
+        if update_animal:
+            new_animal = (
+                edit_custom_animal.strip()
+                if edit_animal_choice == "기타"
+                else edit_animal_choice
+            )
+
+            if not new_animal:
+                st.warning("변경할 동물 종류를 입력해 주세요.")
+
+            elif new_animal == current_animal:
+                st.info("현재 등록된 동물 종류와 같아요.")
+
+            else:
+                try:
+                    result = (
+                        client.table("care_profiles")
+                        .update(
+                            {"animal_type": new_animal},
+                            returning="representation"
+                        )
+                        .eq("user_id", user.id)
+                        .eq("id", selected_id)
+                        .eq("profile_type", "반려동물")
+                        .execute()
+                    )
+
+                    if not result.data:
+                        raise ValueError(
+                            "변경된 관리 대상이 없어요. "
+                            "목록을 다시 확인해 주세요."
+                        )
+
+                except Exception as error:
+                    show_error(
+                        "동물 종류 수정 결과를 확인하지 못했어요. "
+                        "페이지를 다시 열어 확인해 주세요.",
+                        error
+                    )
+
+                else:
+                    st.session_state[profile_notice_key] = (
+                        f"{profile['name']}의 동물 종류를 "
+                        f"‘{new_animal}’(으)로 수정했어요."
+                    )
+                    st.rerun()
 
 
 # 혈당 입력
+form_key = f"glucose_{scope}_{revision}"
+
 with st.form(form_key):
     c1, c2 = st.columns(2)
 
@@ -308,10 +401,7 @@ with st.form(form_key):
 
     measure_time = c2.time_input(
         "🕐 측정 시간",
-        value=now.time().replace(
-            second=0,
-            microsecond=0
-        ),
+        value=now.time().replace(second=0, microsecond=0),
         step=60,
         key=f"{form_key}_time"
     )
@@ -396,10 +486,7 @@ if saved:
             ).execute()
 
         except Exception as error:
-            show_error(
-                "기록을 저장하지 못했어요.",
-                error
-            )
+            show_error("기록을 저장하지 못했어요.", error)
 
         else:
             st.session_state[notice_key] = (
