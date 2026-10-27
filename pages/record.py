@@ -259,13 +259,28 @@ st.subheader(f"{profile['name']}의 혈당 관리")
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 
 
+# 저장 완료 안내와 입력 양식 초기화 번호
+scope = f"{user.id}_{selected_id}"
+notice_key = f"glucose_notice_{scope}"
+revision_key = f"glucose_revision_{scope}"
+revision = st.session_state.get(revision_key, 0)
+
+notice = st.session_state.pop(notice_key, None)
+
+if notice:
+    st.success(notice)
+
+form_key = f"glucose_{scope}_{revision}"
+
+
 # 혈당 입력
-with st.form(f"glucose_{selected_id}"):
+with st.form(form_key):
     c1, c2 = st.columns(2)
 
     measure_date = c1.date_input(
         "📅 측정 날짜",
-        value=now.date()
+        value=now.date(),
+        key=f"{form_key}_date"
     )
 
     measure_time = c2.time_input(
@@ -274,7 +289,8 @@ with st.form(f"glucose_{selected_id}"):
             second=0,
             microsecond=0
         ),
-        step=60
+        step=60,
+        key=f"{form_key}_time"
     )
 
     st.caption(
@@ -287,24 +303,28 @@ with st.form(f"glucose_{selected_id}"):
         min_value=0,
         max_value=1000,
         value=0,
-        step=1
+        step=1,
+        key=f"{form_key}_glucose"
     )
 
     meal = st.selectbox(
         "🍽️ 측정 시점",
-        MEALS
+        MEALS,
+        key=f"{form_key}_meal"
     )
 
     insulin = st.number_input(
         "💉 인슐린 투여량 (단위)",
         min_value=0.0,
         value=0.0,
-        step=0.5
+        step=0.5,
+        key=f"{form_key}_insulin"
     )
 
     memo = st.text_area(
         "📝 메모",
-        placeholder="식사, 활동량, 컨디션 등을 기록해 주세요."
+        placeholder="식사, 활동량, 컨디션 등을 기록해 주세요.",
+        key=f"{form_key}_memo"
     )
 
     saved = st.form_submit_button(
@@ -345,10 +365,12 @@ if saved:
             )
 
         else:
-            st.success(
+            st.session_state[notice_key] = (
                 f"{profile['name']}의 혈당 "
                 f"{glucose} mg/dL 기록을 저장했어요!"
             )
+            st.session_state[revision_key] = revision + 1
+            st.rerun()
 
 
 # 관련 페이지 이동
