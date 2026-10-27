@@ -183,7 +183,7 @@ pet_count = sum(
 
 c1, c2, c3 = st.columns(3)
 
-c1.metric("전체 관리 대상", f"{len(profiles)}명·마리")
+c1.metric("등록된 관리 대상", str(len(profiles)))
 c2.metric("사람", f"{people_count}명")
 c3.metric("반려동물", f"{pet_count}마리")
 
