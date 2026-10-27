@@ -280,6 +280,7 @@ with st.form(form_key):
     measure_date = c1.date_input(
         "📅 측정 날짜",
         value=now.date(),
+        max_value=now.date(),
         key=f"{form_key}_date"
     )
 
@@ -295,7 +296,8 @@ with st.form(form_key):
 
     st.caption(
         "시간은 대한민국 기준이며, "
-        "오후 1시는 13:00으로 저장돼요."
+        "오후 1시는 13:00으로 저장돼요. "
+        "현재보다 미래인 측정 시각은 저장할 수 없어요."
     )
 
     glucose = st.number_input(
@@ -335,7 +337,20 @@ with st.form(form_key):
 
 # 혈당 저장
 if saved:
-    if glucose <= 0:
+    measured_at = datetime.combine(
+        measure_date,
+        measure_time
+    ).replace(tzinfo=ZoneInfo("Asia/Seoul"))
+
+    current_time = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    if measured_at > current_time:
+        st.warning(
+            "측정 시각이 현재보다 미래예요. "
+            "실제로 측정한 날짜와 시간으로 바꿔 주세요."
+        )
+
+    elif glucose <= 0:
         st.warning("혈당 수치를 입력해 주세요.")
 
     elif meal == "선택해 주세요":
