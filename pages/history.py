@@ -643,7 +643,7 @@ st.sidebar.title("🩸 당당케어")
 
 st.sidebar.page_link(
     "pages/home.py",
-    label="우리집 케어 홈",
+    label="우리 가족 케어",
     icon="🏠"
 )
 
