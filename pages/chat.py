@@ -9,6 +9,7 @@ from openai import (
 )
 
 from app_shared import require_login
+from record_context import show_record_context
 
 
 MODEL = "gemini-3.5-flash-lite"
@@ -176,11 +177,43 @@ if profiles:
     )
 
     st.info(
-        f"현재 대화 보관 대상: {profile['name']} · {kind}"
+        f"현재 선택한 관리 대상: {profile['name']} · {kind}"
     )
 
 else:
     profile_id = "general"
+
+
+# 기록 미리보기
+if profiles:
+    with st.expander("📋 내 기록 불러와 미리보기"):
+        show_record_context(
+            client=client,
+            user_id=user.id,
+            profile_id=profile_id
+        )
+
+        st.caption(
+            "여기서 불러온 기록은 앱 안에서만 표시해요. "
+            "아래 채팅 질문에 자동으로 첨부되지 않아요."
+        )
+
+else:
+    st.info(
+        "관리 대상을 등록하면 저장된 기록의 미리보기를 "
+        "이용할 수 있어요."
+    )
+
+    st.page_link(
+        "pages/record.py",
+        label="관리 대상 등록하러 가기",
+        icon="➕"
+    )
+
+
+# 채팅 안내
+st.divider()
+st.subheader("💬 일반 정보 질문하기")
 
 st.caption(
     "질문과 최근 대화가 Google Gemini로 전송돼요. "
@@ -263,7 +296,7 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(question)
 
-    # 저장된 건강 기록이나 관리 대상 정보는 요청에 넣지 않는다.
+    # 미리보기 기록은 요청에 포함하지 않는다.
     request_messages = [
         {
             "role": "system",
@@ -377,7 +410,6 @@ if user_input:
             )
 
         else:
-            # 정상적으로 받은 질문·답변만 한 쌍으로 보관
             st.session_state[messages_key] = [
                 *history,
                 {
