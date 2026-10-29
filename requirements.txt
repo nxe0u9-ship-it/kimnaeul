@@ -3,3 +3,4 @@ supabase>=2,<3
 pandas>=2,<3
 plotly>=5.18,<8
 requests
+openai
