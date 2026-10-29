@@ -45,7 +45,7 @@ def show_menu():
     st.sidebar.title("🩸 당당케어")
 
     for path, label, icon in [
-        ("pages/home.py", "우리집 케어 홈", "🏠"),
+        ("pages/home.py", "우리 가족 케어", "🏠"),
         ("pages/record.py", "혈당 기록하기", "🩸"),
         ("pages/history.py", "기록 확인·수정", "📈"),
         ("pages/lifestyle.py", "식사·활동 기록", "📝"),
@@ -116,9 +116,11 @@ def require_login():
             "로그인 상태를 확인하지 못했어요. "
             "잠시 후 다시 시도해 주세요."
         )
+
         if st.button("로그인 화면으로 돌아가기"):
             st.session_state.clear()
             st.rerun()
+
         st.stop()
 
     if user:
@@ -156,7 +158,10 @@ def require_login():
     # 로그인
     with login_tab:
         with st.form("login_form", clear_on_submit=True):
-            email = st.text_input("이메일", key="login_email")
+            email = st.text_input(
+                "이메일",
+                key="login_email"
+            )
             password = st.text_input(
                 "비밀번호",
                 type="password",
@@ -170,6 +175,7 @@ def require_login():
         if submitted:
             if not email.strip() or not password:
                 st.warning("이메일과 비밀번호를 입력해 주세요.")
+
             else:
                 try:
                     result = client.auth.sign_in_with_password({
@@ -179,11 +185,13 @@ def require_login():
 
                     if result.session:
                         st.rerun()
+
                     else:
                         st.error(
                             "로그인하지 못했어요. "
                             "이메일 인증 여부를 확인해 주세요."
                         )
+
                 except Exception as error:
                     message = str(error).lower()
 
@@ -192,6 +200,7 @@ def require_login():
                             "가입 확인 메일의 인증 링크를 "
                             "먼저 눌러 주세요."
                         )
+
                     else:
                         st.error(
                             "로그인하지 못했어요. "
@@ -304,6 +313,7 @@ def require_login():
                             "이미 가입된 이메일이에요. "
                             "위의 로그인 탭에서 로그인해 주세요."
                         )
+
                     else:
                         st.error(
                             "가입 요청을 처리하지 못했어요. "
