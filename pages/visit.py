@@ -119,7 +119,7 @@ div[data-testid="stForm"] {
 st.sidebar.title("🩸 당당케어")
 
 for path, label, icon in [
-    ("pages/home.py", "우리집 케어 홈", "🏠"),
+    ("pages/home.py", "우리 가족 케어", "🏠"),
     ("pages/record.py", "혈당 기록하기", "🩸"),
     ("pages/history.py", "기록 확인·수정", "📈"),
     ("pages/lifestyle.py", "식사·활동 기록", "📝"),
