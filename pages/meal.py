@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from app_shared import require_login
+from meal_ai import show_meal_recommendations
 
 
 UNITS = [
@@ -200,8 +201,8 @@ except Exception as error:
 
 st.title("🍽️ 냉장고 식단 추천")
 st.caption(
-    "가지고 있는 재료와 식사 조건을 저장해요. "
-    "AI 식단 추천 기능은 연결을 준비하고 있어요."
+    "가지고 있는 재료와 식사 조건을 저장하고, "
+    "AI에게 아침·점심·저녁 메뉴를 추천받아요."
 )
 
 if not profiles:
@@ -271,7 +272,7 @@ scope = f"{user.id}_{profile_id}"
 # 사람 대상 식단 페이지
 if profile["profile_type"] != "사람":
     st.info(
-        "냉장고 식단 추천은 현재 사람 대상으로 준비하고 있어요. "
+        "냉장고 식단 추천은 현재 사람 대상 기능이에요. "
         "왼쪽에서 사람 관리 대상을 선택해 주세요."
     )
     st.page_link(
@@ -323,7 +324,7 @@ ingredient_rows = [
         "보유량": item.get("amount"),
         "단위": item.get("unit") or None
     }
-    for item in settings.get("ingredients", [])
+    for item in (settings.get("ingredients") or [])
 ]
 
 if not ingredient_rows:
@@ -341,10 +342,12 @@ ingredient_df = pd.DataFrame(
 ingredient_df["재료명"] = (
     ingredient_df["재료명"].astype("string")
 )
+
 ingredient_df["보유량"] = pd.to_numeric(
     ingredient_df["보유량"],
     errors="coerce"
 ).astype(float)
+
 ingredient_df["단위"] = (
     ingredient_df["단위"].astype("string")
 )
@@ -406,10 +409,15 @@ with st.form(form_key):
         max_chars=1000
     )
 
+    st.caption(
+        "알레르기 항목은 보관용이며, "
+        "이번 AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
+    )
+
     excluded_foods = st.text_area(
         "제외하고 싶은 음식·재료",
         value=settings.get("excluded_foods") or "",
-        placeholder="예: 버섯, 고수",
+        placeholder="예: 버섯, 고수 — 음식·재료 이름만 입력",
         max_chars=1000
     )
 
@@ -421,6 +429,11 @@ with st.form(form_key):
             "없으면 비워 두어도 돼요."
         ),
         max_chars=3000
+    )
+
+    st.caption(
+        "의료진 지침은 보관용이며, "
+        "이번 AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
     )
 
     c1, c2 = st.columns(2)
@@ -519,10 +532,12 @@ else:
         "저장한 재료",
         f"{len(saved_ingredients)}종류"
     )
+
     c2.metric(
         "한 끼 인분 수",
         f"{settings['servings']}인분"
     )
+
     c3.metric(
         "한 끼 최대 조리 시간",
         f"{settings['max_cooking_minutes']}분"
@@ -574,31 +589,9 @@ else:
     )
 
 
-# API 연결 후 사용할 추천 영역
-st.divider()
-st.markdown("### ✨ 하루 식단 추천")
-
-st.info(
-    "AI 연결 준비 중이에요. "
-    "지금은 재료와 식사 조건을 저장할 수 있어요. "
-    "저장한 내용을 AI에 전송하거나 식단을 생성하지는 않아요."
+# Gemini 식단 추천 화면 연결
+show_meal_recommendations(
+    user_id=user.id,
+    profile_id=profile_id,
+    settings=settings
 )
-
-st.button(
-    "🍽️ 아침·점심·저녁 추천받기 — 준비 중",
-    disabled=True,
-    use_container_width=True
-)
-
-breakfast, lunch, dinner = st.tabs([
-    "🌅 아침",
-    "☀️ 점심",
-    "🌙 저녁"
-])
-
-for section in [breakfast, lunch, dinner]:
-    with section:
-        st.caption(
-            "AI 연결 후 메뉴, 재료별 사용량, "
-            "조리법, 추가로 필요한 재료를 표시할 자리예요."
-        )
