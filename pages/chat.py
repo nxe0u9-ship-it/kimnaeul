@@ -10,6 +10,7 @@ from openai import (
 
 from app_shared import require_login
 from record_context import show_record_context
+from record_ai import show_record_analysis
 
 
 MODEL = "gemini-3.5-flash-lite"
@@ -25,8 +26,10 @@ SYSTEM_PROMPT = """
 역할:
 - 혈당 측정 용어, 기록 방법, 식사와 활동에 관한 일반 정보를 설명한다.
 - 모르는 내용은 모른다고 말하고 사실을 만들어내지 않는다.
-- 사용자의 저장된 혈당, 식사, 활동 기록을 조회할 수 없다.
+- 이 일반 채팅에서는 사용자의 저장된 기록을 전달받지 않는다.
 - 기록을 확인하거나 분석했다고 말하지 않는다.
+- 저장 기록에 관한 질문이면 위의 '선택한 기록으로 질문하기'
+  기능을 이용하도록 안내한다.
 - 사람과 반려동물의 기준을 혼동하지 않는다.
 - 설명에 대상 구분이 필요하지만 불명확하면 먼저 질문한다.
 
@@ -160,11 +163,11 @@ else:
     profile_menu.caption("등록된 관리 대상이 없어요.")
 
 
-# AI 화면
+# 페이지 안내
 st.title("💬 AI에게 물어보기")
 st.caption(
-    "혈당 기록 방법과 식사·활동에 관한 일반 정보를 "
-    "쉬운 한국어로 물어보세요."
+    "선택한 기간의 기록을 요약받거나, "
+    "혈당 기록 방법과 식사·활동에 관한 일반 정보를 물어보세요."
 )
 
 if profiles:
@@ -184,24 +187,34 @@ else:
     profile_id = "general"
 
 
-# 기록 미리보기
+# 기록 미리보기와 기록 기반 질문
 if profiles:
-    with st.expander("📋 내 기록 불러와 미리보기"):
-        show_record_context(
+    with st.expander(
+        "📋 내 기록 불러와 미리보기",
+        expanded=True
+    ):
+        record_payload = show_record_context(
             client=client,
             user_id=user.id,
             profile_id=profile_id
         )
 
         st.caption(
-            "여기서 불러온 기록은 앱 안에서만 표시해요. "
-            "아래 채팅 질문에 자동으로 첨부되지 않아요."
+            "기록을 불러오는 것만으로는 AI에 전송되지 않아요. "
+            "아래에서 전송 내용을 확인하고 "
+            "전송 버튼을 눌렀을 때만 요청해요."
         )
+
+    show_record_analysis(
+        user_id=user.id,
+        profile_id=profile_id,
+        payload=record_payload
+    )
 
 else:
     st.info(
-        "관리 대상을 등록하면 저장된 기록의 미리보기를 "
-        "이용할 수 있어요."
+        "관리 대상을 등록하면 저장된 기록을 불러와 "
+        "기록 기반 질문 기능을 이용할 수 있어요."
     )
 
     st.page_link(
@@ -211,23 +224,23 @@ else:
     )
 
 
-# 채팅 안내
+# 일반 채팅 안내
 st.divider()
 st.subheader("💬 일반 정보 질문하기")
 
 st.caption(
-    "질문과 최근 대화가 Google Gemini로 전송돼요. "
-    "실제 혈당·검사 결과나 개인정보는 입력하지 마세요. "
-    "선택한 대상의 이름과 저장된 기록은 자동 전송하지 않아요."
+    "이 채팅에는 직접 입력한 질문과 최근 대화만 전송돼요. "
+    "위에서 불러온 기록이나 기록 요약 답변은 "
+    "일반 채팅에 자동으로 첨부되지 않아요."
 )
 
 st.caption(
-    "AI 답변은 일반 정보이며 의료진 또는 수의사의 "
-    "진단·치료를 대신하지 않아요."
+    "일반 질문에는 실제 혈당·검사 결과나 개인정보를 입력하지 마세요. "
+    "AI 답변은 의료진 또는 수의사의 진단·치료를 대신하지 않아요."
 )
 
 
-# 로그인 사용자와 관리 대상별로 대화 분리
+# 사용자·관리 대상별 일반 대화 보관
 scope = f"{user.id}_{profile_id}"
 messages_key = f"care_chat_messages_{scope}"
 
@@ -235,17 +248,17 @@ if messages_key not in st.session_state:
     st.session_state[messages_key] = []
 
 if st.button(
-    "🗑️ 현재 대화 지우기",
+    "🗑️ 일반 대화 지우기",
     key=f"clear_chat_{scope}"
 ):
     st.session_state[messages_key] = []
     st.rerun()
 
 st.caption(
-    "대화는 현재 접속 세션에서만 보관해요. "
+    "일반 대화는 현재 접속 세션에서만 보관해요. "
     "AI에는 최근 6번의 질문·답변을 함께 보내며, "
     "화면에는 최근 10번의 대화를 남겨요. "
-    "대화 지우기는 앱 안의 대화 목록을 비우는 기능이에요."
+    "대화 지우기는 앱 안의 일반 대화 목록을 비우는 기능이에요."
 )
 
 
@@ -262,7 +275,7 @@ if not api_key:
     st.stop()
 
 
-# 기존 대화 표시
+# 일반 대화 표시
 history = st.session_state[messages_key]
 
 if not history:
@@ -276,7 +289,7 @@ for message in history:
         st.markdown(message["content"])
 
 
-# 질문 입력
+# 일반 질문 입력
 user_input = st.chat_input(
     "일반적인 용어나 기록 방법을 물어보세요.",
     key=f"care_chat_input_{scope}"
@@ -296,7 +309,7 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(question)
 
-    # 미리보기 기록은 요청에 포함하지 않는다.
+    # 기록 미리보기나 기록 분석 결과는 일반 채팅에 넣지 않는다.
     request_messages = [
         {
             "role": "system",
