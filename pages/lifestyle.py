@@ -1,7 +1,8 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 from zoneinfo import ZoneInfo
 import json
+import math
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,8 @@ TYPE_LABELS = {
 }
 
 UNITS = ["g", "mL", "개", "공기", "인분", "장", "컵"]
+MEAL_SLOTS = ["아침", "점심", "저녁", "간식", "기타"]
+INTENSITIES = ["가벼움", "보통", "높음"]
 
 
 def show_error(message, error):
@@ -54,8 +57,6 @@ def base_query(client, user_id, profile_id):
 def check_activity_conflict(
     client, user_id, profile_id, record_date, record_type
 ):
-    # 같은 날짜에 활동 기록과 '활동 없음'이
-    # 함께 저장되는 것을 앱에서 확인한다.
     opposite = {
         "activity": "no_activity",
         "no_activity": "activity"
@@ -129,6 +130,387 @@ def display_records(rows):
         })
 
     return pd.DataFrame(result)
+
+
+# 수정 내용 검증
+def build_edit_values(kind, form, now):
+    now = now.replace(tzinfo=None)
+    day = form["date"]
+
+    if kind not in TYPE_LABELS:
+        raise ValueError("수정할 수 없는 기록 종류예요.")
+
+    values = {
+        "record_date": day.isoformat(),
+        "record_time": None,
+        "item_name": None,
+        "meal_slot": None,
+        "amount": None,
+        "amount_unit": None,
+        "duration_minutes": None,
+        "intensity": None,
+        "memo": form.get("memo", "").strip()
+    }
+
+    if kind == "no_activity":
+        if day >= now.date():
+            raise ValueError(
+                "활동 없음은 하루가 끝난 날짜에만 기록해 주세요."
+            )
+
+        if not form.get("confirmed"):
+            raise ValueError("활동 없음 확인란을 체크해 주세요.")
+
+        values["item_name"] = "활동 없음 확인"
+        return values
+
+    clock = form["time"].replace(
+        second=0,
+        microsecond=0,
+        tzinfo=None
+    )
+
+    started = datetime.combine(day, clock)
+
+    if started > now:
+        raise ValueError(
+            "아직 지나지 않은 시각으로 수정할 수 없어요."
+        )
+
+    values["record_time"] = clock.strftime("%H:%M")
+
+    if kind == "meal":
+        name = form.get("name", "").strip()
+        amount = float(form.get("amount", 0))
+        unit = form.get("unit", "").strip()
+        slot = form.get("meal_slot")
+
+        if not name:
+            raise ValueError("음식명·사료명을 입력해 주세요.")
+
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError(
+                "섭취량은 0보다 큰 숫자로 입력해 주세요."
+            )
+
+        if not unit or slot not in MEAL_SLOTS:
+            raise ValueError(
+                "섭취량 단위와 식사 구분을 확인해 주세요."
+            )
+
+        values.update(
+            item_name=name,
+            amount=amount,
+            amount_unit=unit,
+            meal_slot=slot
+        )
+
+    elif kind == "activity":
+        name = form.get("name", "").strip()
+        duration = int(form.get("duration", 0))
+        intensity = form.get("intensity")
+
+        if not name:
+            raise ValueError("활동명을 입력해 주세요.")
+
+        if (
+            not 1 <= duration <= 1440
+            or intensity not in INTENSITIES
+        ):
+            raise ValueError("활동 시간과 강도를 확인해 주세요.")
+
+        ended = started + timedelta(minutes=duration)
+
+        if ended > now:
+            raise ValueError(
+                "활동이 끝난 뒤 실제 활동 시간을 기록해 주세요."
+            )
+
+        next_midnight = datetime.combine(
+            day + timedelta(days=1),
+            time(0, 0)
+        )
+
+        if ended > next_midnight:
+            raise ValueError(
+                "자정을 넘긴 활동은 날짜별로 나눠 기록해 주세요."
+            )
+
+        values.update(
+            item_name=name,
+            duration_minutes=duration,
+            intensity=intensity
+        )
+
+    elif kind == "sleep":
+        wake_clock = form["wake_time"].replace(
+            second=0,
+            microsecond=0,
+            tzinfo=None
+        )
+
+        ended = datetime.combine(
+            form["wake_date"],
+            wake_clock
+        )
+
+        duration = int(
+            (ended - started).total_seconds() // 60
+        )
+
+        if duration <= 0:
+            raise ValueError(
+                "일어난 시각은 잠든 시각보다 늦어야 해요."
+            )
+
+        if ended > now:
+            raise ValueError(
+                "일어난 시각은 현재보다 늦을 수 없어요."
+            )
+
+        values.update(
+            item_name="수면",
+            duration_minutes=duration
+        )
+
+    return values
+
+
+# 선택한 기록 수정 화면
+def show_lifestyle_editor(client, user_id, profile_id, row):
+    kind = row["record_type"]
+
+    if kind not in TYPE_LABELS:
+        st.info("이 종류의 기록은 수정 화면을 지원하지 않아요.")
+        return
+
+    scope = f"{user_id}_{profile_id}"
+    prefix = (
+        f"lifestyle_edit_{scope}_{row['id']}_"
+        f"{fingerprint(row)}"
+    )
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    original_day = date.fromisoformat(row["record_date"])
+
+    original_clock = time.fromisoformat(
+        row.get("record_time") or "00:00"
+    )
+
+    latest_day = (
+        now.date() - timedelta(days=1)
+        if kind == "no_activity"
+        else now.date()
+    )
+
+    st.markdown("### ✏️ 선택한 기록 수정")
+    st.caption(
+        f"기록 종류: {TYPE_LABELS[kind]} · "
+        "종류는 유지하고 내용을 수정해요. "
+        "기존 혈당 기록과의 연결도 유지돼요."
+    )
+
+    form = {}
+
+    with st.form(prefix):
+        form["date"] = st.date_input(
+            "잠든 날짜 수정"
+            if kind == "sleep"
+            else "기록 날짜 수정",
+            value=original_day,
+            max_value=max(original_day, latest_day)
+        )
+
+        if kind != "no_activity":
+            form["time"] = st.time_input(
+                "잠든 시간 수정"
+                if kind == "sleep"
+                else "시작·섭취 시간 수정",
+                value=original_clock,
+                step=60
+            )
+
+        if kind == "meal":
+            form["name"] = st.text_input(
+                "음식명·사료명 수정",
+                value=row.get("item_name") or ""
+            )
+
+            slot = row.get("meal_slot") or "기타"
+
+            form["meal_slot"] = st.selectbox(
+                "식사 구분 수정",
+                MEAL_SLOTS,
+                index=(
+                    MEAL_SLOTS.index(slot)
+                    if slot in MEAL_SLOTS
+                    else 4
+                )
+            )
+
+            form["amount"] = st.number_input(
+                "먹은 양 수정",
+                min_value=0.0,
+                value=float(row.get("amount") or 0),
+                step=0.5
+            )
+
+            original_unit = row.get("amount_unit") or "g"
+
+            units = (
+                UNITS
+                if original_unit in UNITS
+                else UNITS + [original_unit]
+            )
+
+            form["unit"] = st.selectbox(
+                "단위 수정",
+                units,
+                index=units.index(original_unit)
+            )
+
+        elif kind == "activity":
+            form["name"] = st.text_input(
+                "활동명 수정",
+                value=row.get("item_name") or ""
+            )
+
+            original_duration = max(
+                1,
+                int(row.get("duration_minutes") or 1)
+            )
+
+            form["duration"] = st.number_input(
+                "활동 시간 수정(분)",
+                min_value=1,
+                max_value=max(1440, original_duration),
+                value=original_duration,
+                step=1
+            )
+
+            intensity = row.get("intensity") or "보통"
+
+            form["intensity"] = st.selectbox(
+                "활동 강도 수정",
+                INTENSITIES,
+                index=(
+                    INTENSITIES.index(intensity)
+                    if intensity in INTENSITIES
+                    else 1
+                )
+            )
+
+        elif kind == "sleep":
+            original_end = (
+                datetime.combine(original_day, original_clock)
+                + timedelta(
+                    minutes=int(row.get("duration_minutes") or 1)
+                )
+            )
+
+            form["wake_date"] = st.date_input(
+                "일어난 날짜 수정",
+                value=original_end.date(),
+                max_value=max(
+                    original_end.date(),
+                    now.date()
+                )
+            )
+
+            form["wake_time"] = st.time_input(
+                "일어난 시간 수정",
+                value=original_end.time(),
+                step=60
+            )
+
+        else:
+            form["confirmed"] = st.checkbox(
+                "수정한 날짜에 따로 기록할 운동·산책 활동이 "
+                "없었음을 확인했어요."
+            )
+
+        form["memo"] = st.text_area(
+            "보충 메모 수정",
+            value=row.get("memo") or ""
+        )
+
+        save = st.form_submit_button(
+            "💾 수정 내용 저장",
+            use_container_width=True
+        )
+
+    if not save:
+        return
+
+    try:
+        values = build_edit_values(
+            kind,
+            form,
+            datetime.now(ZoneInfo("Asia/Seoul"))
+        )
+
+        check_activity_conflict(
+            client,
+            user_id,
+            profile_id,
+            values["record_date"],
+            kind
+        )
+
+        result = (
+            client.table("lifestyle_records")
+            .update(
+                values,
+                returning="representation"
+            )
+            .eq("user_id", user_id)
+            .eq("profile_id", profile_id)
+            .eq("id", row["id"])
+            .eq("record_type", kind)
+            .execute()
+        )
+
+        if not result.data:
+            raise ValueError(
+                "변경된 기록이 없어요. "
+                "목록을 다시 불러와 주세요."
+            )
+
+    except ValueError as error:
+        st.warning(str(error))
+
+    except Exception as error:
+        if getattr(error, "code", None) == "23505":
+            st.warning(
+                "이 날짜에는 이미 활동 없음 확인이 있어요. "
+                "날짜를 확인해 주세요."
+            )
+
+        else:
+            show_error(
+                "수정 결과를 확인하지 못했어요. "
+                "목록을 다시 불러와 주세요.",
+                error
+            )
+
+    else:
+        # 수정 전 기록을 담은 미리보기·분석 결과 초기화
+        st.session_state.pop(
+            f"care_record_context_{scope}",
+            None
+        )
+        st.session_state.pop(
+            f"record_ai_result_{scope}",
+            None
+        )
+
+        st.session_state.lifestyle_notice = (
+            user_id,
+            profile_id,
+            "선택한 기록을 수정했어요."
+        )
+
+        st.rerun()
 
 
 st.set_page_config(
@@ -261,10 +643,12 @@ with profile_menu:
             if item["profile_type"] == "사람"
             else "🐾"
         )
+
         kind = (
             item.get("animal_type")
             or item["profile_type"]
         )
+
         label = f"{icon} {item['name']} · {kind}"
 
         if sum(
@@ -294,10 +678,7 @@ scope = f"{user.id}_{profile_id}"
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 today = now.date()
-clock = now.time().replace(
-    second=0,
-    microsecond=0
-)
+clock = now.time().replace(second=0, microsecond=0)
 
 st.title("📝 식사·활동 기록")
 st.caption(
@@ -434,11 +815,12 @@ with st.form(form_key):
     if record_type == "meal":
         meal_slot = st.selectbox(
             "식사 구분",
-            ["아침", "점심", "저녁", "간식", "기타"]
+            MEAL_SLOTS
         )
 
         for index in range(int(food_count)):
             st.markdown(f"**음식 {index + 1}**")
+
             c1, c2, c3 = st.columns([2, 1, 1])
 
             food_name = c1.text_input(
@@ -482,7 +864,7 @@ with st.form(form_key):
 
         intensity = st.selectbox(
             "느낀 활동 강도",
-            ["가벼움", "보통", "높음"]
+            INTENSITIES
         )
 
     elif record_type == "sleep":
@@ -757,7 +1139,8 @@ if not rows:
 
 st.caption(
     f"최신 기록 {len(rows)}건 표시 · 최대 1,000건. "
-    "식사는 음식 한 종류당 한 행으로 표시해요."
+    "식사는 음식 한 종류당 한 행으로 표시해요. "
+    "표에서 한 행을 선택하면 수정하거나 삭제할 수 있어요."
 )
 
 table = display_records(rows)
@@ -780,7 +1163,7 @@ st.download_button(
 )
 
 
-# 잘못 입력한 기록 삭제
+# 선택한 기록 수정·삭제
 positions = event["selection"]["rows"]
 
 if positions and 0 <= positions[0] < len(rows):
@@ -795,9 +1178,11 @@ if positions and 0 <= positions[0] < len(rows):
         f"{row.get('item_name') or ''}"
     )
 
-    st.caption(
-        "이번 버전에서는 잘못 입력한 기록을 삭제한 뒤 "
-        "위에서 올바른 내용으로 다시 입력할 수 있어요."
+    show_lifestyle_editor(
+        client=client,
+        user_id=user.id,
+        profile_id=profile_id,
+        row=row
     )
 
     with st.form(
