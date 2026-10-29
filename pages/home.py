@@ -40,7 +40,7 @@ def move_to_profile(profile_id, path):
 
 
 st.set_page_config(
-    page_title="우리집 케어 홈 | 당당케어",
+    page_title="우리 가족 케어 | 당당케어",
     page_icon="🏠",
     layout="wide"
 )
@@ -60,7 +60,7 @@ div.stButton > button {
 st.sidebar.title("🩸 당당케어")
 
 for path, label, icon in [
-    ("pages/home.py", "우리집 케어 홈", "🏠"),
+    ("pages/home.py", "우리 가족 케어", "🏠"),
     ("pages/record.py", "혈당 기록하기", "🩸"),
     ("pages/history.py", "기록 확인·수정", "📈"),
     ("pages/lifestyle.py", "식사·활동 기록", "📝"),
@@ -87,7 +87,7 @@ client, user = require_login()
 now = datetime.now(ZoneInfo("Asia/Seoul"))
 today = now.date()
 
-st.title("🏠 우리집 케어 홈")
+st.title("🏠 우리 가족 케어")
 st.caption(
     f"대한민국 기준 {today:%Y-%m-%d} · "
     "나와 가족, 반려동물의 기록을 한눈에 확인해요."
