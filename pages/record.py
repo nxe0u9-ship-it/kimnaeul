@@ -295,6 +295,79 @@ if profile_notice:
     st.success(profile_notice)
 
 
+# 관리 대상 이름 수정
+current_name = profile["name"]
+name_form_key = f"profile_name_form_{scope}_{current_name}"
+
+with st.expander("✏️ 관리 대상 이름 수정"):
+    st.caption(
+        f"수정할 대상: {current_name} · "
+        "다른 대상을 수정하려면 왼쪽 메뉴에서 먼저 선택해 주세요."
+    )
+
+    st.caption(
+        "이름을 변경해도 기존 혈당·식사·활동 기록과 "
+        "진료 노트는 같은 관리 대상에 연결돼요."
+    )
+
+    with st.form(name_form_key):
+        edited_name = st.text_input(
+            "변경할 이름 또는 별명",
+            value=current_name,
+            max_chars=50
+        )
+
+        save_name = st.form_submit_button(
+            "💾 이름 수정 저장",
+            use_container_width=True
+        )
+
+    if save_name:
+        new_name = edited_name.strip()
+
+        if not new_name:
+            st.warning("변경할 이름 또는 별명을 입력해 주세요.")
+
+        elif len(new_name) > 50:
+            st.warning("이름 또는 별명은 50자 이내로 입력해 주세요.")
+
+        elif new_name == current_name:
+            st.info("현재 등록된 이름과 같아요.")
+
+        else:
+            try:
+                result = (
+                    client.table("care_profiles")
+                    .update(
+                        {"name": new_name},
+                        returning="representation"
+                    )
+                    .eq("user_id", user.id)
+                    .eq("id", selected_id)
+                    .execute()
+                )
+
+                if not result.data:
+                    raise ValueError(
+                        "변경된 관리 대상이 없어요. "
+                        "목록을 다시 확인해 주세요."
+                    )
+
+            except Exception as error:
+                show_error(
+                    "이름 수정 결과를 확인하지 못했어요. "
+                    "페이지를 다시 열어 확인해 주세요.",
+                    error
+                )
+
+            else:
+                st.session_state[profile_notice_key] = (
+                    f"관리 대상 이름을 ‘{current_name}’에서 "
+                    f"‘{new_name}’(으)로 수정했어요."
+                )
+                st.rerun()
+
+
 # 등록된 반려동물 종류 수정
 if profile["profile_type"] == "반려동물":
     current_animal = profile.get("animal_type") or ""
