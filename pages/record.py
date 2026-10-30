@@ -275,26 +275,33 @@ with st.expander("✏️ 관리 대상 이름 수정"):
         )
 
         proposed_name = edited_name.strip()
+        save_name = False
 
-        if proposed_name:
+        if proposed_name == current_name:
+            st.info("현재와 동일한 이름이에요.")
+
+        elif proposed_name:
             st.text(
                 f"변경 전: {current_name} → 변경 후: {proposed_name}"
             )
+
+            save_name = st.button(
+                f"💾 ‘{current_name}’ → ‘{proposed_name}’ 변경 저장",
+                key=f"{name_form_key}_save",
+                use_container_width=True
+            )
+
         else:
             st.caption(
                 "새 이름을 입력하면 변경 전·후 이름이 표시돼요."
             )
 
-        save_name = st.button(
-            (
-                f"💾 ‘{current_name}’ → ‘{proposed_name}’ 변경 저장"
-                if proposed_name
-                else "💾 새 이름으로 변경 저장"
-            ),
-            key=f"{name_form_key}_save",
-            use_container_width=True,
-            disabled=not proposed_name
-        )
+            st.button(
+                "💾 새 이름으로 변경 저장",
+                key=f"{name_form_key}_save",
+                use_container_width=True,
+                disabled=True
+            )
 
     if save_name:
         new_name = edited_name.strip()
@@ -306,7 +313,7 @@ with st.expander("✏️ 관리 대상 이름 수정"):
             st.warning("이름 또는 별명은 50자 이내로 입력해 주세요.")
 
         elif new_name == current_name:
-            st.info("현재 등록된 이름과 같아요.")
+            st.info("현재와 동일한 이름이에요.")
 
         else:
             try:
