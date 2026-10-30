@@ -125,47 +125,20 @@ div[data-testid="stForm"] {
 # 왼쪽 메뉴
 st.sidebar.title("🩸 당당케어")
 
-st.sidebar.page_link(
-    "pages/home.py",
-    label="우리 가족 케어",
-    icon="🏠"
-)
-
-st.sidebar.page_link(
-    "pages/record.py",
-    label="혈당 기록하기",
-    icon="🩸"
-)
-
-st.sidebar.page_link(
-    "pages/history.py",
-    label="기록 확인·수정",
-    icon="📈"
-)
-
-st.sidebar.page_link(
-    "pages/lifestyle.py",
-    label="식사·활동 기록",
-    icon="📝"
-)
-
-st.sidebar.page_link(
-    "pages/meal.py",
-    label="냉장고 식단 추천",
-    icon="🍽️"
-)
-
-st.sidebar.page_link(
-    "pages/explore.py",
-    label="내 기록 탐구실",
-    icon="🔍"
-)
-
-st.sidebar.page_link(
-    "pages/visit.py",
-    label="진료 준비 노트",
-    icon="🏥"
-)
+for path, label, icon in [
+    ("pages/home.py", "우리 가족 케어", "🏠"),
+    ("pages/record.py", "혈당 기록하기", "🩸"),
+    ("pages/history.py", "기록 확인·수정", "📈"),
+    ("pages/lifestyle.py", "식사·활동 기록", "📝"),
+    ("pages/meal.py", "냉장고 식단 추천", "🍽️"),
+    ("pages/explore.py", "내 기록 탐구실", "🔍"),
+    ("pages/visit.py", "진료 준비 노트", "🏥")
+]:
+    st.sidebar.page_link(
+        path,
+        label=label,
+        icon=icon
+    )
 
 profile_menu = st.sidebar.container()
 
@@ -517,6 +490,8 @@ if save_clicked:
 st.divider()
 st.markdown("### 📋 현재 저장된 내용")
 
+saved_ingredients = settings.get("ingredients") or []
+
 if not settings:
     st.info(
         "아직 저장한 내용이 없어요. "
@@ -524,8 +499,6 @@ if not settings:
     )
 
 else:
-    saved_ingredients = settings.get("ingredients") or []
-
     c1, c2, c3 = st.columns(3)
 
     c1.metric(
@@ -587,6 +560,88 @@ else:
         "입력란을 수정해도 저장 버튼을 누르기 전에는 "
         "위의 저장 내용이 바뀌지 않아요."
     )
+
+
+# 냉장고 재료 초기화
+with st.expander("🗑️ 냉장고 재료 전체 초기화"):
+    st.warning(
+        f"‘{profile['name']}’의 저장된 냉장고 재료 "
+        f"{len(saved_ingredients)}종류를 모두 비워요. "
+        "초기화한 재료 목록은 앱에서 복구할 수 없어요."
+    )
+
+    st.caption(
+        "알레르기, 제외할 음식, 의료진 지침, 인분 수와 "
+        "조리 시간은 유지돼요. "
+        "다른 관리 대상의 재료도 유지돼요."
+    )
+
+    with st.form(
+        f"reset_fridge_{scope}_{revision}"
+    ):
+        confirm_fridge = st.checkbox(
+            "선택한 대상의 냉장고 재료를 모두 비우는 것을 확인했어요."
+        )
+
+        fridge_name = st.text_input(
+            "확인을 위해 현재 관리 대상 이름을 그대로 입력해 주세요.",
+            help=f"입력할 이름: {profile['name']}"
+        )
+
+        reset_fridge = st.form_submit_button(
+            "🗑️ 냉장고 재료 전체 초기화",
+            use_container_width=True,
+            disabled=not bool(saved_ingredients)
+        )
+
+    if not saved_ingredients:
+        st.caption("초기화할 저장 재료가 없어요.")
+
+    if reset_fridge:
+        if not confirm_fridge:
+            st.warning("초기화 확인란을 먼저 체크해 주세요.")
+
+        elif fridge_name.strip() != profile["name"]:
+            st.warning("현재 관리 대상 이름을 정확히 입력해 주세요.")
+
+        else:
+            try:
+                result = (
+                    client.table("meal_settings")
+                    .update(
+                        {
+                            "ingredients": [],
+                            "updated_at": datetime.now(
+                                ZoneInfo("Asia/Seoul")
+                            ).isoformat()
+                        },
+                        returning="representation"
+                    )
+                    .eq("user_id", user.id)
+                    .eq("profile_id", profile_id)
+                    .execute()
+                )
+
+                if not result.data:
+                    raise ValueError(
+                        "초기화된 냉장고가 없어요. "
+                        "페이지를 다시 열어 확인해 주세요."
+                    )
+
+            except Exception as error:
+                show_error(
+                    "초기화 결과를 확인하지 못했어요. "
+                    "페이지를 다시 열어 저장된 재료를 확인해 주세요.",
+                    error
+                )
+
+            else:
+                st.session_state.meal_notice = (
+                    user.id,
+                    profile_id,
+                    f"{profile['name']}의 냉장고 재료를 모두 비웠어요."
+                )
+                st.rerun()
 
 
 # Gemini 식단 추천 화면 연결
