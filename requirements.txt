@@ -1,6 +1,8 @@
-streamlit>=1.35,<2
+streamlit>=1.46,<2
 supabase>=2,<3
 pandas>=2,<3
 plotly>=5.18,<8
 requests
 openai
+extra-streamlit-components>=0.1.71,<0.2
+cryptography
