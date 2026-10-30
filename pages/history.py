@@ -11,6 +11,7 @@ import streamlit as st
 
 from app_shared import require_login
 from record_links import show_linked_records
+from sidebar_menu import show_sidebar_menu
 
 
 MEALS = [
@@ -638,58 +639,8 @@ div[data-testid="stForm"] {
 """, unsafe_allow_html=True)
 
 
-# 왼쪽 메뉴
-st.sidebar.title("🩸 당당케어")
-
-st.sidebar.page_link(
-    "pages/home.py",
-    label="우리 가족 케어",
-    icon="🏠"
-)
-
-st.sidebar.page_link(
-    "pages/record.py",
-    label="혈당 기록하기",
-    icon="🩸"
-)
-
-st.sidebar.page_link(
-    "pages/history.py",
-    label="기록 확인·수정",
-    icon="📈"
-)
-
-st.sidebar.page_link(
-    "pages/lifestyle.py",
-    label="식사·활동 기록",
-    icon="📝"
-)
-
-st.sidebar.page_link(
-    "pages/meal.py",
-    label="냉장고 식단 추천",
-    icon="🍽️"
-)
-
-st.sidebar.page_link(
-    "pages/explore.py",
-    label="내 기록 탐구실",
-    icon="🔍"
-)
-
-st.sidebar.page_link(
-    "pages/visit.py",
-    label="진료 준비 노트",
-    icon="🏥"
-)
-
-profile_menu = st.sidebar.container()
-
-st.sidebar.page_link(
-    "pages/chat.py",
-    label="AI에게 물어보기",
-    icon="💬"
-)
+# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
+profile_menu = show_sidebar_menu("pages/history.py")
 
 
 # 로그인 확인
