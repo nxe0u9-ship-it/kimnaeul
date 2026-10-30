@@ -16,6 +16,12 @@ UNITS = [
     "개", "장", "봉", "팩", "컵", "공기"
 ]
 
+RESET_OPTIONS = {
+    "냉장고 재료만 초기화": "ingredients",
+    "식사 조건만 초기화": "conditions",
+    "냉장고 재료·식사 조건 모두 초기화": "all"
+}
+
 
 def fingerprint(value):
     return sha256(
@@ -96,6 +102,31 @@ def clean_ingredients(rows):
         })
 
     return result
+
+
+def build_reset_values(reset_type):
+    values = {}
+
+    if reset_type in ["ingredients", "all"]:
+        values["ingredients"] = []
+
+    if reset_type in ["conditions", "all"]:
+        values.update({
+            "allergies": "",
+            "excluded_foods": "",
+            "dietary_guidance": "",
+            "servings": 1,
+            "max_cooking_minutes": 30
+        })
+
+    if not values:
+        raise ValueError("초기화할 항목을 선택해 주세요.")
+
+    values["updated_at"] = datetime.now(
+        ZoneInfo("Asia/Seoul")
+    ).isoformat()
+
+    return values
 
 
 st.set_page_config(
@@ -210,10 +241,12 @@ with profile_menu:
             if item["profile_type"] == "사람"
             else "🐾"
         )
+
         kind = (
             item.get("animal_type")
             or item["profile_type"]
         )
+
         label = f"{icon} {item['name']} · {kind}"
 
         if sum(
@@ -562,59 +595,112 @@ else:
     )
 
 
-# 냉장고 재료 초기화
-with st.expander("🗑️ 냉장고 재료 전체 초기화"):
-    st.warning(
-        f"‘{profile['name']}’의 저장된 냉장고 재료 "
-        f"{len(saved_ingredients)}종류를 모두 비워요. "
-        "초기화한 재료 목록은 앱에서 복구할 수 없어요."
+# 냉장고·식사 조건 선택 초기화
+with st.expander("🗑️ 냉장고·식사 조건 초기화"):
+    st.write(f"초기화할 관리 대상: **{profile['name']}**")
+
+    reset_label = st.radio(
+        "초기화할 항목 옆의 선택 칸을 눌러 주세요.",
+        list(RESET_OPTIONS),
+        index=None,
+        key=f"meal_reset_choice_{scope}_{revision}"
     )
 
-    st.caption(
-        "알레르기, 제외할 음식, 의료진 지침, 인분 수와 "
-        "조리 시간은 유지돼요. "
-        "다른 관리 대상의 재료도 유지돼요."
-    )
+    reset_type = RESET_OPTIONS.get(reset_label)
 
-    with st.form(
-        f"reset_fridge_{scope}_{revision}"
-    ):
-        confirm_fridge = st.checkbox(
-            "선택한 대상의 냉장고 재료를 모두 비우는 것을 확인했어요."
+    if reset_type == "ingredients":
+        st.warning(
+            f"저장된 냉장고 재료 "
+            f"{len(saved_ingredients)}종류를 모두 비워요."
         )
 
-        fridge_name = st.text_input(
+        st.caption(
+            "알레르기, 제외할 음식, 의료진 지침, "
+            "인분 수와 조리 시간은 유지돼요."
+        )
+
+    elif reset_type == "conditions":
+        st.warning(
+            "알레르기, 제외할 음식·재료, "
+            "의료진에게 받은 식사 지침을 모두 비워요. "
+            "인분 수는 1인분, 최대 조리 시간은 30분으로 돌아가요."
+        )
+
+        st.caption("저장된 냉장고 재료는 유지돼요.")
+
+    elif reset_type == "all":
+        st.warning(
+            "냉장고 재료와 식사 조건을 모두 초기화해요. "
+            "알레르기, 제외할 음식·재료, 의료진 지침을 비우고, "
+            "인분 수는 1인분, 최대 조리 시간은 30분으로 돌아가요."
+        )
+
+    else:
+        st.info("위에서 초기화할 항목을 하나 선택해 주세요.")
+
+    st.caption(
+        "초기화한 내용은 앱에서 복구할 수 없어요. "
+        "선택한 대상의 냉장고·식사 조건에만 적용되며, "
+        "혈당 기록과 식사·활동 기록은 유지돼요."
+    )
+
+    if not settings:
+        st.caption("아직 저장한 재료·식사 조건이 없어요.")
+
+    reset_has_data = (
+        bool(saved_ingredients)
+        if reset_type == "ingredients"
+        else bool(settings)
+    )
+
+    if (
+        reset_type == "ingredients"
+        and settings
+        and not saved_ingredients
+    ):
+        st.caption("초기화할 냉장고 재료가 없어요.")
+
+    reset_form_key = (
+        f"meal_reset_form_{scope}_{revision}_{reset_type}"
+    )
+
+    with st.form(reset_form_key):
+        confirm_reset = st.checkbox(
+            "선택한 항목이 초기화되는 것을 확인했어요."
+        )
+
+        reset_name = st.text_input(
             "확인을 위해 현재 관리 대상 이름을 그대로 입력해 주세요.",
             help=f"입력할 이름: {profile['name']}"
         )
 
-        reset_fridge = st.form_submit_button(
-            "🗑️ 냉장고 재료 전체 초기화",
+        reset_clicked = st.form_submit_button(
+            "🗑️ 선택한 항목 초기화",
             use_container_width=True,
-            disabled=not bool(saved_ingredients)
+            disabled=(
+                reset_type is None
+                or not reset_has_data
+            )
         )
 
-    if not saved_ingredients:
-        st.caption("초기화할 저장 재료가 없어요.")
+    if reset_clicked:
+        if reset_type is None:
+            st.warning("초기화할 항목을 먼저 선택해 주세요.")
 
-    if reset_fridge:
-        if not confirm_fridge:
+        elif not confirm_reset:
             st.warning("초기화 확인란을 먼저 체크해 주세요.")
 
-        elif fridge_name.strip() != profile["name"]:
+        elif reset_name.strip() != profile["name"]:
             st.warning("현재 관리 대상 이름을 정확히 입력해 주세요.")
 
         else:
             try:
+                reset_values = build_reset_values(reset_type)
+
                 result = (
                     client.table("meal_settings")
                     .update(
-                        {
-                            "ingredients": [],
-                            "updated_at": datetime.now(
-                                ZoneInfo("Asia/Seoul")
-                            ).isoformat()
-                        },
+                        reset_values,
                         returning="representation"
                     )
                     .eq("user_id", user.id)
@@ -624,22 +710,37 @@ with st.expander("🗑️ 냉장고 재료 전체 초기화"):
 
                 if not result.data:
                     raise ValueError(
-                        "초기화된 냉장고가 없어요. "
+                        "초기화된 설정이 없어요. "
                         "페이지를 다시 열어 확인해 주세요."
                     )
 
             except Exception as error:
                 show_error(
                     "초기화 결과를 확인하지 못했어요. "
-                    "페이지를 다시 열어 저장된 재료를 확인해 주세요.",
+                    "페이지를 다시 열어 저장 내용을 확인해 주세요.",
                     error
                 )
 
             else:
+                result_messages = {
+                    "ingredients": (
+                        f"{profile['name']}의 냉장고 재료를 "
+                        "초기화했어요."
+                    ),
+                    "conditions": (
+                        f"{profile['name']}의 식사 조건을 "
+                        "초기화했어요."
+                    ),
+                    "all": (
+                        f"{profile['name']}의 냉장고 재료와 "
+                        "식사 조건을 모두 초기화했어요."
+                    )
+                }
+
                 st.session_state.meal_notice = (
                     user.id,
                     profile_id,
-                    f"{profile['name']}의 냉장고 재료를 모두 비웠어요."
+                    result_messages[reset_type]
                 )
                 st.rerun()
 
