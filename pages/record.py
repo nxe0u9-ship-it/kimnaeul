@@ -47,7 +47,6 @@ div[data-testid="stForm"] {
 """, unsafe_allow_html=True)
 
 
-# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/record.py")
 
 
@@ -61,7 +60,7 @@ st.caption(
 )
 
 
-# 로그인한 계정의 관리 대상 불러오기
+# 관리 대상 불러오기
 try:
     profiles = (
         client.table("care_profiles")
@@ -615,164 +614,6 @@ show_record_links(
     user_id=user.id,
     profile_id=selected_id
 )
-
-
-# 혈당 기록 전체 초기화
-st.divider()
-
-with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
-    reset_count = None
-
-    try:
-        count_result = (
-            client.table("blood_glucose")
-            .select(
-                "record_id",
-                count="exact",
-                head=True
-            )
-            .eq("user_id", user.id)
-            .eq("profile_id", selected_id)
-            .execute()
-        )
-
-        if count_result.count is None:
-            raise ValueError("혈당 기록 수를 확인하지 못했어요.")
-
-        reset_count = count_result.count
-
-    except Exception as error:
-        show_error(
-            "초기화할 혈당 기록 수를 확인하지 못했어요.",
-            error
-        )
-
-    if reset_count is not None:
-        st.warning(
-            f"‘{profile['name']}’의 혈당 기록 "
-            f"{reset_count}건을 날짜와 관계없이 모두 삭제해요. "
-            "삭제한 기록은 앱에서 복구할 수 없어요."
-        )
-
-        st.caption(
-            "관리 대상과 식사·활동 기록, 냉장고 재료, "
-            "진료 노트의 질문·메모는 유지돼요. "
-            "다른 관리 대상의 혈당 기록도 유지돼요."
-        )
-
-        st.caption(
-            "삭제할 혈당에 연결된 식사·활동의 연결 정보도 사라져요. "
-            "진료 노트에 골라둔 혈당은 삭제 후 조회할 수 없고, "
-            "혈당 통계와 그래프에서도 제외돼요."
-        )
-
-        st.page_link(
-            "pages/history.py",
-            label="삭제 전에 기록 확인·수정에서 CSV 다운로드하기",
-            icon="📥"
-        )
-
-        reset_form_key = (
-            f"reset_glucose_{scope}_{reset_count}_{revision}"
-        )
-
-        with st.form(reset_form_key):
-            confirm_reset = st.checkbox(
-                "선택한 대상의 혈당 기록 전체가 삭제되는 것을 확인했어요."
-            )
-
-            reset_name = st.text_input(
-                "확인을 위해 현재 관리 대상 이름을 그대로 입력해 주세요.",
-                help=f"입력할 이름: {profile['name']}"
-            )
-
-            reset_clicked = st.form_submit_button(
-                "🗑️ 이 대상의 혈당 기록 전체 삭제",
-                use_container_width=True,
-                disabled=reset_count == 0
-            )
-
-        if reset_count == 0:
-            st.caption("초기화할 혈당 기록이 없어요.")
-
-        if reset_clicked:
-            if not confirm_reset:
-                st.warning("전체 삭제 확인란을 먼저 체크해 주세요.")
-
-            elif reset_name.strip() != profile["name"]:
-                st.warning(
-                    "현재 관리 대상 이름을 정확히 입력해 주세요."
-                )
-
-            else:
-                try:
-                    (
-                        client.table("blood_glucose")
-                        .delete(returning="minimal")
-                        .eq("user_id", user.id)
-                        .eq("profile_id", selected_id)
-                        .execute()
-                    )
-
-                    # 응답 행 수 제한과 관계없이 남은 기록을 확인한다.
-                    remaining_result = (
-                        client.table("blood_glucose")
-                        .select(
-                            "record_id",
-                            count="exact",
-                            head=True
-                        )
-                        .eq("user_id", user.id)
-                        .eq("profile_id", selected_id)
-                        .execute()
-                    )
-
-                    if remaining_result.count is None:
-                        raise ValueError(
-                            "삭제 후 남은 기록 수를 확인하지 못했어요."
-                        )
-
-                    if remaining_result.count != 0:
-                        raise ValueError(
-                            "혈당 기록이 남아 있어요. "
-                            "기록 목록과 삭제 권한을 확인해 주세요."
-                        )
-
-                except Exception as error:
-                    # 삭제가 실행된 뒤 결과 확인만 실패했을 수도 있다.
-                    st.session_state.pop(
-                        f"care_record_context_{scope}",
-                        None
-                    )
-                    st.session_state.pop(
-                        f"record_ai_result_{scope}",
-                        None
-                    )
-
-                    show_error(
-                        "전체 삭제 결과를 확인하지 못했어요. "
-                        "기록 확인·수정 페이지에서 "
-                        "남은 기록을 확인해 주세요.",
-                        error
-                    )
-
-                else:
-                    st.session_state.pop(
-                        f"care_record_context_{scope}",
-                        None
-                    )
-                    st.session_state.pop(
-                        f"record_ai_result_{scope}",
-                        None
-                    )
-
-                    st.session_state[revision_key] = revision + 1
-
-                    st.session_state[notice_key] = (
-                        f"{profile['name']}의 혈당 기록을 "
-                        "모두 삭제했어요."
-                    )
-                    st.rerun()
 
 
 # 관련 페이지 이동
