@@ -253,8 +253,10 @@ current_name = profile["name"]
 name_form_key = f"profile_name_form_{scope}_{current_name}"
 
 with st.expander("✏️ 관리 대상 이름 수정"):
+    st.text(f"현재 등록된 이름: {current_name}")
+
     st.caption(
-        f"수정할 대상: {current_name} · "
+        "이 대상을 어떤 새 이름으로 바꿀까요? "
         "다른 대상을 수정하려면 왼쪽 메뉴에서 먼저 선택해 주세요."
     )
 
@@ -263,23 +265,42 @@ with st.expander("✏️ 관리 대상 이름 수정"):
         "진료 노트는 같은 관리 대상에 연결돼요."
     )
 
-    with st.form(name_form_key):
+    with st.container(border=True):
         edited_name = st.text_input(
-            "변경할 이름 또는 별명",
-            value=current_name,
-            max_chars=50
+            "새 이름 또는 별명을 입력해 주세요.",
+            value="",
+            placeholder="기존 이름 대신 사용할 새 이름 입력",
+            max_chars=50,
+            key=f"{name_form_key}_new_name"
         )
 
-        save_name = st.form_submit_button(
-            "💾 이름 수정 저장",
-            use_container_width=True
+        proposed_name = edited_name.strip()
+
+        if proposed_name:
+            st.text(
+                f"변경 전: {current_name} → 변경 후: {proposed_name}"
+            )
+        else:
+            st.caption(
+                "새 이름을 입력하면 변경 전·후 이름이 표시돼요."
+            )
+
+        save_name = st.button(
+            (
+                f"💾 ‘{current_name}’ → ‘{proposed_name}’ 변경 저장"
+                if proposed_name
+                else "💾 새 이름으로 변경 저장"
+            ),
+            key=f"{name_form_key}_save",
+            use_container_width=True,
+            disabled=not proposed_name
         )
 
     if save_name:
         new_name = edited_name.strip()
 
         if not new_name:
-            st.warning("변경할 이름 또는 별명을 입력해 주세요.")
+            st.warning("새 이름 또는 별명을 입력해 주세요.")
 
         elif len(new_name) > 50:
             st.warning("이름 또는 별명은 50자 이내로 입력해 주세요.")
