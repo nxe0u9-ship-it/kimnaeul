@@ -1,6 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
 from hashlib import sha256
-from zoneinfo import ZoneInfo
 import json
 import math
 import time
@@ -12,27 +11,27 @@ from openai import (
     APIStatusError,
     APITimeoutError,
     AuthenticationError,
-    RateLimitError
+    RateLimitError,
 )
 from pydantic import BaseModel
+
+from app_shared import get_local_now, get_timezone_name
 
 
 MODEL = "gemini-3.5-flash-lite"
 
-BASE_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/openai/"
-)
+BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 MEAL_SECTIONS = [
     ("breakfast", "🌅 아침"),
     ("lunch", "☀️ 점심"),
-    ("dinner", "🌙 저녁")
+    ("dinner", "🌙 저녁"),
 ]
 
 DOG_SECTIONS = [
     ("breakfast", "🐾 후보 1"),
     ("lunch", "🐾 후보 2"),
-    ("dinner", "🐾 후보 3")
+    ("dinner", "🐾 후보 3"),
 ]
 
 # 이름이 정확히 일치하는 단일 식재료만 전달해요.
@@ -44,7 +43,7 @@ DOG_INGREDIENT_NAMES = {
     "오이",
     "브로콜리",
     "단호박",
-    "달걀"
+    "달걀",
 }
 
 
@@ -122,13 +121,12 @@ def fingerprint(value):
         json.dumps(
             value,
             sort_keys=True,
-            ensure_ascii=False
+            ensure_ascii=False,
         ).encode("utf-8")
     ).hexdigest()
 
 
 def resolve_target(profile):
-    # 기존 사람용 호출과 호환
     if profile is None:
         return "person"
 
@@ -148,7 +146,36 @@ def resolve_target(profile):
     )
 
 
-def build_request(settings, target="person"):
+def ingredient_is_current(item, today):
+    value = item.get("expiry_date")
+
+    if value is None or value == "":
+        return True
+
+    try:
+        if isinstance(value, datetime):
+            expiry = value.date()
+
+        elif isinstance(value, date):
+            expiry = value
+
+        else:
+            expiry = date.fromisoformat(
+                str(value).strip()
+            )
+
+    except (ValueError, TypeError):
+        return False
+
+    # 오늘까지인 재료는 포함해요.
+    return expiry >= today
+
+
+def build_request(
+    settings,
+    target="person",
+    today=None,
+):
     if target not in {"person", "dog"}:
         raise ValueError("추천 대상을 확인해 줘.")
 
@@ -164,6 +191,12 @@ def build_request(settings, target="person"):
             "한 번에 추천에 사용할 재료는 최대 50종류야."
         )
 
+    today = (
+        today
+        if today is not None
+        else get_local_now().date()
+    )
+
     cleaned = []
 
     for item in ingredients:
@@ -171,6 +204,10 @@ def build_request(settings, target="person"):
             raise ValueError(
                 "저장된 재료 형식을 확인해 줘."
             )
+
+        # 호출하는 페이지와 별개로 여기서도 기한을 확인해요.
+        if not ingredient_is_current(item, today):
+            continue
 
         name = str(
             item.get("name") or ""
@@ -204,8 +241,15 @@ def build_request(settings, target="person"):
         cleaned.append({
             "name": name,
             "amount": amount,
-            "unit": unit if amount is not None else ""
+            "unit": unit if amount is not None else "",
         })
+
+    if not cleaned:
+        raise ValueError(
+            "추천에 사용할 재료가 없어. "
+            "기한이 지났거나 날짜 확인이 필요한 재료는 제외돼. "
+            "냉장고의 재료와 기한을 확인해 줘."
+        )
 
     servings = int(
         settings.get("servings", 1)
@@ -258,7 +302,7 @@ def build_request(settings, target="person"):
             "target": "dog",
             "ingredients": cleaned,
             "excluded_foods": excluded_foods,
-            "max_cooking_minutes": cooking_minutes
+            "max_cooking_minutes": cooking_minutes,
         }
 
     # 이름, 계정 ID, 혈당, 실제 식사 기록,
@@ -268,18 +312,18 @@ def build_request(settings, target="person"):
         "ingredients": cleaned,
         "excluded_foods": excluded_foods,
         "servings": servings,
-        "max_cooking_minutes": cooking_minutes
+        "max_cooking_minutes": cooking_minutes,
     }
 
 
 def validate_plan(
     plan,
     max_cooking_minutes,
-    request_data=None
+    request_data=None,
 ):
     result = {}
-
     request_data = request_data or {}
+
     is_dog = request_data.get("target") == "dog"
 
     sections = (
@@ -375,7 +419,7 @@ def validate_plan(
             "steps": [
                 item.strip()
                 for item in meal.steps
-            ]
+            ],
         }
 
     return result
@@ -401,31 +445,29 @@ def request_meal_plan(api_key, request_data):
         api_key=api_key,
         base_url=BASE_URL,
         timeout=60.0,
-        max_retries=0
+        max_retries=0,
     ) as ai_client:
-        completion = (
-            ai_client.beta.chat.completions.parse(
-                model=MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "다음 재료와 조건으로 "
-                            + request_message
-                            + json.dumps(
-                                request_data,
-                                ensure_ascii=False
-                            )
+        completion = ai_client.beta.chat.completions.parse(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "다음 재료와 조건으로 "
+                        + request_message
+                        + json.dumps(
+                            request_data,
+                            ensure_ascii=False,
                         )
-                    }
-                ],
-                response_format=DailyMealPlan,
-                max_tokens=4000
-            )
+                    ),
+                },
+            ],
+            response_format=DailyMealPlan,
+            max_tokens=4000,
         )
 
     if not completion.choices:
@@ -450,7 +492,7 @@ def request_meal_plan(api_key, request_data):
     return validate_plan(
         message.parsed,
         request_data["max_cooking_minutes"],
-        request_data
+        request_data,
     )
 
 
@@ -509,9 +551,7 @@ def render_plan(result):
             st.markdown("**추가로 필요한 재료**")
 
             if meal["additional_ingredients"]:
-                for ingredient in meal[
-                    "additional_ingredients"
-                ]:
+                for ingredient in meal["additional_ingredients"]:
                     st.write(f"• {ingredient}")
 
             else:
@@ -523,7 +563,7 @@ def render_plan(result):
 
             for number, step in enumerate(
                 meal["steps"],
-                start=1
+                start=1,
             ):
                 st.write(f"{number}. {step}")
 
@@ -538,7 +578,7 @@ def show_meal_recommendations(
     user_id,
     profile_id,
     settings,
-    profile=None
+    profile=None,
 ):
     st.divider()
 
@@ -567,9 +607,7 @@ def show_meal_recommendations(
 
         st.caption(
             "지원 재료: "
-            + ", ".join(
-                sorted(DOG_INGREDIENT_NAMES)
-            )
+            + ", ".join(sorted(DOG_INGREDIENT_NAMES))
         )
 
         st.caption(
@@ -614,16 +652,26 @@ def show_meal_recommendations(
         )
         return
 
+    local_today = get_local_now().date()
+    timezone_name = get_timezone_name()
+
+    st.caption(
+        f"재료 기한 확인 기준: {local_today:%Y-%m-%d} "
+        f"({timezone_name}). 기한이 지났거나 날짜가 잘못된 "
+        "재료는 제외하고, 기한 미입력 재료는 포함해."
+    )
+
     try:
         request_data = build_request(
             settings,
-            target
+            target,
+            today=local_today,
         )
 
     except (
         ValueError,
         TypeError,
-        OverflowError
+        OverflowError,
     ) as error:
         st.warning(str(error))
         return
@@ -636,10 +684,7 @@ def show_meal_recommendations(
 
         skipped = [
             item["name"]
-            for item in settings.get(
-                "ingredients",
-                []
-            )
+            for item in settings.get("ingredients", [])
             if item["name"] not in used
         ]
 
@@ -666,7 +711,7 @@ def show_meal_recommendations(
                     f"{item['amount']:g} {item['unit']}"
                     if item["amount"] is not None
                     else "미입력"
-                )
+                ),
             }
             for item in request_data["ingredients"]
         ]
@@ -674,7 +719,7 @@ def show_meal_recommendations(
         st.dataframe(
             ingredient_table,
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
         st.write(
@@ -687,7 +732,7 @@ def show_meal_recommendations(
 
         if not is_dog:
             st.write(
-                "한 끼 인분 수: "
+                f"한 끼 인분 수: "
                 f"{request_data['servings']}인분"
             )
 
@@ -712,17 +757,18 @@ def show_meal_recommendations(
     scope = f"{user_id}_{profile_id}_{target}"
 
     result_key = f"meal_ai_result_{scope}"
-    last_request_key = (
-        f"meal_ai_last_request_{scope}"
-    )
+    last_request_key = f"meal_ai_last_request_{scope}"
 
-    request_version = fingerprint(request_data)
+    # 날짜·시간대는 기존 결과의 유효성 확인에만 사용해요.
+    # Gemini에 보내는 request_data에는 포함하지 않아요.
+    request_version = fingerprint({
+        "request_data": request_data,
+        "local_date": local_today.isoformat(),
+        "timezone": timezone_name,
+    })
 
     api_key = str(
-        st.secrets.get(
-            "GEMINI_API_KEY",
-            ""
-        )
+        st.secrets.get("GEMINI_API_KEY", "")
     ).strip()
 
     if not api_key:
@@ -741,13 +787,13 @@ def show_meal_recommendations(
         button_label,
         disabled=not api_key,
         use_container_width=True,
-        key=f"meal_ai_generate_{scope}"
+        key=f"meal_ai_generate_{scope}",
     )
 
     if generate:
         previous_request = st.session_state.get(
             last_request_key,
-            0.0
+            0.0,
         )
 
         if time.monotonic() - previous_request < 20:
@@ -758,9 +804,9 @@ def show_meal_recommendations(
             )
 
         else:
-            st.session_state[
-                last_request_key
-            ] = time.monotonic()
+            st.session_state[last_request_key] = (
+                time.monotonic()
+            )
 
             spinner_message = (
                 "토핑·간식 후보를 만들고 있어…"
@@ -772,7 +818,7 @@ def show_meal_recommendations(
                 with st.spinner(spinner_message):
                     plan = request_meal_plan(
                         api_key,
-                        request_data
+                        request_data,
                     )
 
             except AuthenticationError:
@@ -839,10 +885,13 @@ def show_meal_recommendations(
                     "servings": request_data.get(
                         "servings"
                     ),
-                    "created_at": datetime.now(
-                        ZoneInfo("Asia/Seoul")
-                    ).strftime("%Y-%m-%d %H:%M"),
-                    "plan": plan
+                    "created_at": (
+                        get_local_now().strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                        + f" ({timezone_name})"
+                    ),
+                    "plan": plan,
                 }
 
                 st.success(
@@ -854,13 +903,10 @@ def show_meal_recommendations(
     result = st.session_state.get(result_key)
 
     if result:
-        if (
-            result["request_version"]
-            != request_version
-        ):
+        if result["request_version"] != request_version:
             st.info(
-                "저장된 재료나 조건이 바뀌었어. "
-                "새 조건으로 추천받아 줘."
+                "저장된 재료·조건 또는 기준 날짜·시간대가 바뀌었어. "
+                "현재 기준으로 다시 추천받아 줘."
             )
 
         else:
