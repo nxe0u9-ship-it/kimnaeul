@@ -1,7 +1,6 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
 from html import escape
-from zoneinfo import ZoneInfo
 import json
 import re
 
@@ -9,7 +8,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_user_timezone,
+    get_local_now
+)
 from record_links import show_linked_records
 from sidebar_menu import show_sidebar_menu
 
@@ -456,6 +460,9 @@ def show_graph(rows, scope, selectable):
 
 
 def edit_record(client, user, profile_id, row):
+    timezone_name = get_timezone_name()
+    user_timezone = get_user_timezone()
+
     st.markdown("### ✏️ 선택한 기록 수정·삭제")
 
     st.info(
@@ -467,7 +474,7 @@ def edit_record(client, user, profile_id, row):
 
     prefix = (
         f"history_edit_{user.id}_{profile_id}_"
-        f"{row['record_id']}_{fingerprint(row)}"
+        f"{row['record_id']}_{fingerprint(row)}_{timezone_name}"
     )
 
     original_meal = row.get("meal") or "기타"
@@ -476,7 +483,7 @@ def edit_record(client, user, profile_id, row):
         else MEALS + [original_meal]
     )
 
-    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    today = get_local_now().date()
     original_date = date.fromisoformat(row["measure_date"])
 
     if original_date > today:
@@ -502,7 +509,7 @@ def edit_record(client, user, profile_id, row):
         )
 
         st.caption(
-            "측정 날짜와 시간은 대한민국 기준이에요. "
+            f"측정 날짜와 시간은 선택한 시간대({timezone_name}) 기준이에요. "
             "현재보다 미래인 시각으로 수정할 수 없어요."
         )
 
@@ -539,10 +546,33 @@ def edit_record(client, user, profile_id, row):
 
     if save:
         measured_at = datetime.combine(
-            edited_date, edited_time
-        ).replace(tzinfo=ZoneInfo("Asia/Seoul"))
+            edited_date,
+            edited_time
+        ).replace(tzinfo=user_timezone)
 
-        if measured_at > datetime.now(ZoneInfo("Asia/Seoul")):
+        current_time = get_local_now()
+
+        round_trip = (
+            measured_at.astimezone(timezone.utc)
+            .astimezone(user_timezone)
+            .replace(tzinfo=None)
+        )
+
+        entered_time = datetime.combine(
+            edited_date,
+            edited_time
+        )
+
+        if round_trip != entered_time:
+            st.warning(
+                "선택한 시간대의 시계 전환으로 존재하지 않는 시각이에요. "
+                "실제로 측정한 날짜와 시간을 다시 확인해 주세요."
+            )
+
+        elif (
+            measured_at.astimezone(timezone.utc)
+            > current_time.astimezone(timezone.utc)
+        ):
             st.warning(
                 "측정 시각이 현재보다 미래예요. "
                 "실제로 측정한 날짜와 시간으로 바꿔 주세요."
@@ -664,11 +694,18 @@ profile_menu = show_sidebar_menu("pages/history.py")
 
 # 로그인 확인
 client, user = require_login()
+timezone_name = get_timezone_name()
 
 st.title("📈 기록 확인·수정")
+
 st.caption(
     "관리 대상별 혈당 기록을 조회하고, "
     "원하는 기록을 찾아 수정하거나 삭제해요."
+)
+
+st.caption(
+    f"조회 기간과 수정 시각 기준: {timezone_name}. "
+    "표와 그래프에는 저장된 측정 날짜·시간을 표시해요."
 )
 
 
@@ -718,10 +755,12 @@ with profile_menu:
             if item["profile_type"] == "사람"
             else "🐾"
         )
+
         kind = (
             item.get("animal_type")
             or item["profile_type"]
         )
+
         label = f"{icon} {item['name']} · {kind}"
 
         if sum(
@@ -745,7 +784,12 @@ with profile_menu:
 
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
+
+# 기록 관련 상태는 기존 계정·대상 기준을 유지해요.
 scope = f"{user.id}_{profile_id}"
+
+# 날짜 입력과 선택 화면은 시간대가 바뀌면 새로 생성해요.
+ui_scope = f"{scope}_{timezone_name}"
 
 st.subheader(f"{profile['name']}의 혈당 기록")
 
@@ -754,7 +798,7 @@ notice = st.session_state.pop("history_notice", None)
 if notice and notice[:2] == (user.id, profile_id):
     st.success(notice[2])
 
-today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+today = get_local_now().date()
 
 
 # 혈당 기록 전체 초기화
@@ -918,7 +962,7 @@ period = st.radio(
     ["오늘", "최근 7일", "최근 30일", "직접 설정"],
     index=1,
     horizontal=True,
-    key=f"history_period_{scope}"
+    key=f"history_period_{ui_scope}"
 )
 
 if period == "직접 설정":
@@ -927,13 +971,13 @@ if period == "직접 설정":
     start = c1.date_input(
         "조회 시작일",
         value=today - timedelta(days=90),
-        key=f"history_start_{scope}"
+        key=f"history_start_{ui_scope}"
     )
 
     end = c2.date_input(
         "조회 종료일",
         value=today,
-        key=f"history_end_{scope}"
+        key=f"history_end_{ui_scope}"
     )
 
 else:
@@ -957,14 +1001,14 @@ if start > end:
 meal = st.selectbox(
     "측정 시점으로 찾기",
     ["전체"] + MEALS,
-    key=f"history_meal_filter_{scope}"
+    key=f"history_meal_filter_{ui_scope}"
 )
 
 
 # 기록 수정·삭제 모드
 editing = st.toggle(
     "✏️ 기록 수정·삭제",
-    key=f"history_editing_{scope}"
+    key=f"history_editing_{ui_scope}"
 )
 
 method = None
@@ -981,7 +1025,7 @@ if editing:
             "표에서 선택"
         ],
         horizontal=True,
-        key=f"history_method_{scope}"
+        key=f"history_method_{ui_scope}"
     )
 
 
@@ -994,19 +1038,19 @@ if method == "검색해서 찾기":
 
     use_date = st.checkbox(
         "특정 날짜로 찾기",
-        key=f"history_use_date_{scope}"
+        key=f"history_use_date_{ui_scope}"
     )
 
     picked_date = st.date_input(
         "찾을 날짜",
         value=end,
         disabled=not use_date,
-        key=f"history_search_date_{scope}"
+        key=f"history_search_date_{ui_scope}"
     )
 
     use_time = st.checkbox(
         "시간대로 찾기",
-        key=f"history_use_time_{scope}"
+        key=f"history_use_time_{ui_scope}"
     )
 
     c1, c2 = st.columns(2)
@@ -1016,7 +1060,7 @@ if method == "검색해서 찾기":
         value=time(0, 0),
         step=60,
         disabled=not use_time,
-        key=f"history_from_time_{scope}"
+        key=f"history_from_time_{ui_scope}"
     )
 
     to_time = c2.time_input(
@@ -1024,13 +1068,13 @@ if method == "검색해서 찾기":
         value=time(23, 59),
         step=60,
         disabled=not use_time,
-        key=f"history_to_time_{scope}"
+        key=f"history_to_time_{ui_scope}"
     )
 
     memo = st.text_input(
         "메모에 포함된 단어",
         placeholder="예: 산책, 아침, 간식",
-        key=f"history_memo_search_{scope}"
+        key=f"history_memo_search_{ui_scope}"
     )
 
     if not (use_date or use_time or memo.strip()):
@@ -1108,7 +1152,7 @@ c2.metric(
 # 그래프
 selected = show_graph(
     rows,
-    scope,
+    ui_scope,
     selectable=(
         editing
         and method == "그래프에서 선택"
@@ -1123,7 +1167,10 @@ if editing and method in ["검색해서 찾기", "표에서 선택"]:
         if method == "검색해서 찾기"
         else "### 📋 표에서 기록 선택"
     )
-    selected = select_from_table(rows, scope)
+    selected = select_from_table(
+        rows,
+        ui_scope
+    )
 
 else:
     st.markdown("### 📋 기록 목록")
@@ -1159,7 +1206,9 @@ with st.expander("🔗 혈당에 연결된 식사·활동 보기"):
         for row in rows
     }
 
-    related_choice_key = f"history_related_choice_{scope}"
+    related_choice_key = (
+        f"history_related_choice_{ui_scope}"
+    )
 
     if st.session_state.get(related_choice_key) not in related_map:
         st.session_state[related_choice_key] = next(iter(related_map))
@@ -1211,5 +1260,5 @@ st.download_button(
     ).encode("utf-8-sig"),
     file_name=download_filename,
     mime="text/csv",
-    key=f"history_download_{scope}"
+    key=f"history_download_{ui_scope}"
 )
