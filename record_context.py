@@ -1,19 +1,21 @@
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import timedelta
 
 import streamlit as st
+
+from app_shared import get_local_now, get_timezone_name
 
 
 TYPE_LABELS = {
     "meal": "식사",
     "activity": "운동·산책",
     "sleep": "수면",
-    "no_activity": "활동 없음 확인"
+    "no_activity": "활동 없음 확인",
 }
 
 
 def show_error(message, error):
     st.error(message)
+
     st.caption(
         f"오류 종류: {type(error).__name__} / "
         f"오류 코드: {getattr(error, 'code', None) or '없음'}"
@@ -52,7 +54,7 @@ def load_record_context(
     user_id,
     profile_id,
     start,
-    end
+    end,
 ):
     # 로그인 사용자의 관리 대상인지 확인
     profiles = (
@@ -115,7 +117,7 @@ def load_record_context(
             "time": str(row["measure_time"]),
             "glucose_mg_dl": row["glucose"],
             "measurement_context": row.get("meal"),
-            "insulin_units": row.get("insulin")
+            "insulin_units": row.get("insulin"),
         }
         for row in blood_rows
     ]
@@ -134,13 +136,13 @@ def load_record_context(
             "amount": row.get("amount"),
             "amount_unit": row.get("amount_unit"),
             "duration_minutes": row.get("duration_minutes"),
-            "intensity": row.get("intensity")
+            "intensity": row.get("intensity"),
         }
         for row in lifestyle_rows
     ]
 
     subject = {
-        "profile_type": profile["profile_type"]
+        "profile_type": profile["profile_type"],
     }
 
     if profile["profile_type"] == "반려동물":
@@ -150,10 +152,10 @@ def load_record_context(
         "subject": subject,
         "period": {
             "start": start.isoformat(),
-            "end": end.isoformat()
+            "end": end.isoformat(),
         },
         "blood_glucose": blood,
-        "lifestyle": lifestyle
+        "lifestyle": lifestyle,
     }
 
 
@@ -166,7 +168,7 @@ def blood_table(rows):
             "측정 시점": (
                 row.get("measurement_context") or "미입력"
             ),
-            "인슐린 (단위)": row.get("insulin_units")
+            "인슐린 (단위)": row.get("insulin_units"),
         }
         for row in rows
     ]
@@ -187,7 +189,7 @@ def lifestyle_table(rows):
             ),
             "종류": TYPE_LABELS.get(
                 row["kind"],
-                row["kind"]
+                row["kind"],
             ),
             "음식·활동": row.get("item_name") or "",
             "식사 구분": row.get("meal_slot") or "",
@@ -197,7 +199,7 @@ def lifestyle_table(rows):
                 else ""
             ),
             "지속 시간(분)": row.get("duration_minutes"),
-            "강도": row.get("intensity") or ""
+            "강도": row.get("intensity") or "",
         })
 
     return result
@@ -206,7 +208,27 @@ def lifestyle_table(rows):
 def show_record_context(client, user_id, profile_id):
     scope = f"{user_id}_{profile_id}"
     snapshot_key = f"care_record_context_{scope}"
-    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+
+    timezone_name = get_timezone_name()
+    today = get_local_now().date()
+
+    # 날짜나 시간대가 바뀌면 날짜 입력의 기본값도 갱신
+    ui_scope = (
+        f"{scope}_{timezone_name}_{today.isoformat()}"
+    )
+
+    snapshot = st.session_state.get(snapshot_key)
+
+    if (
+        snapshot
+        and snapshot.get("timezone") != timezone_name
+    ):
+        st.session_state.pop(snapshot_key, None)
+
+        st.info(
+            "기준 시간대가 바뀌었어. "
+            "현재 시간대에서 기간을 선택하고 기록을 다시 불러와 줘."
+        )
 
     st.subheader("📋 내 기록 미리보기")
 
@@ -216,19 +238,24 @@ def show_record_context(client, user_id, profile_id):
         "AI로 전송하지 않아."
     )
 
-    with st.form(f"record_context_form_{scope}"):
+    st.caption(
+        f"조회 날짜 기준: {today:%Y-%m-%d} ({timezone_name}). "
+        "기록의 날짜·시간은 저장된 값을 그대로 표시해."
+    )
+
+    with st.form(f"record_context_form_{ui_scope}"):
         c1, c2 = st.columns(2)
 
         start = c1.date_input(
             "살펴볼 기록 시작일",
             value=today - timedelta(days=6),
-            max_value=today
+            max_value=today,
         )
 
         end = c2.date_input(
             "살펴볼 기록 종료일",
             value=today,
-            max_value=today
+            max_value=today,
         )
 
         st.caption(
@@ -237,28 +264,39 @@ def show_record_context(client, user_id, profile_id):
 
         load_clicked = st.form_submit_button(
             "📋 이 기간의 기록 불러오기",
-            use_container_width=True
+            use_container_width=True,
         )
 
     if load_clicked:
         if start > end:
-            st.warning("시작일은 종료일보다 늦을 수 없어.")
+            st.warning(
+                "시작일은 종료일보다 늦을 수 없어."
+            )
+
+        elif end > get_local_now().date():
+            st.warning(
+                "종료일은 현재 시간대의 오늘보다 늦을 수 없어."
+            )
 
         elif (end - start).days > 89:
-            st.warning("조회 기간은 최대 90일로 설정해 줘.")
+            st.warning(
+                "조회 기간은 최대 90일로 설정해 줘."
+            )
 
         else:
             # 새 조회가 실패하면 이전 기록과 혼동하지 않도록 초기화
             st.session_state.pop(snapshot_key, None)
 
             try:
-                with st.spinner("선택한 기간의 기록을 불러오고 있어…"):
+                with st.spinner(
+                    "선택한 기간의 기록을 불러오고 있어…"
+                ):
                     payload = load_record_context(
                         client=client,
                         user_id=user_id,
                         profile_id=profile_id,
                         start=start,
-                        end=end
+                        end=end,
                     )
 
             except ValueError as error:
@@ -269,16 +307,17 @@ def show_record_context(client, user_id, profile_id):
                 show_error(
                     "기록을 불러오지 못했어. "
                     "잠시 후 다시 시도해 줘.",
-                    error
+                    error,
                 )
                 return None
 
             else:
                 st.session_state[snapshot_key] = {
-                    "loaded_at": datetime.now(
-                        ZoneInfo("Asia/Seoul")
-                    ).strftime("%Y-%m-%d %H:%M"),
-                    "payload": payload
+                    "loaded_at": get_local_now().strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
+                    "timezone": timezone_name,
+                    "payload": payload,
                 }
 
                 st.success("기록을 불러왔어.")
@@ -286,17 +325,21 @@ def show_record_context(client, user_id, profile_id):
     snapshot = st.session_state.get(snapshot_key)
 
     if not snapshot:
-        st.info("기간을 선택하고 기록 불러오기를 눌러 줘.")
+        st.info(
+            "기간을 선택하고 기록 불러오기를 눌러 줘."
+        )
         return None
 
     payload = snapshot["payload"]
+
     period = payload["period"]
     blood = payload["blood_glucose"]
     lifestyle = payload["lifestyle"]
 
     st.caption(
         f"불러온 기간: {period['start']} ~ {period['end']} · "
-        f"조회 시각: {snapshot['loaded_at']}"
+        f"조회 시각: {snapshot['loaded_at']} "
+        f"({snapshot['timezone']})"
     )
 
     st.caption(
@@ -306,21 +349,24 @@ def show_record_context(client, user_id, profile_id):
 
     c1, c2, c3 = st.columns(3)
 
-    c1.metric("혈당 기록", f"{len(blood)}건")
+    c1.metric(
+        "혈당 기록",
+        f"{len(blood)}건",
+    )
 
     c2.metric(
         "식사 기록",
-        f"{sum(row['kind'] == 'meal' for row in lifestyle)}건"
+        f"{sum(row['kind'] == 'meal' for row in lifestyle)}건",
     )
 
     c3.metric(
         "운동·산책 기록",
-        f"{sum(row['kind'] == 'activity' for row in lifestyle)}건"
+        f"{sum(row['kind'] == 'activity' for row in lifestyle)}건",
     )
 
     blood_tab, lifestyle_tab = st.tabs([
         "🩸 혈당 기록",
-        "📝 식사·활동·수면 기록"
+        "📝 식사·활동·수면 기록",
     ])
 
     with blood_tab:
@@ -328,22 +374,26 @@ def show_record_context(client, user_id, profile_id):
             st.dataframe(
                 blood_table(blood),
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
             )
 
         else:
-            st.info("이 기간에 저장된 혈당 기록이 없어.")
+            st.info(
+                "이 기간에 저장된 혈당 기록이 없어."
+            )
 
     with lifestyle_tab:
         if lifestyle:
             st.dataframe(
                 lifestyle_table(lifestyle),
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
             )
 
         else:
-            st.info("이 기간에 저장된 식사·활동 기록이 없어.")
+            st.info(
+                "이 기간에 저장된 식사·활동 기록이 없어."
+            )
 
         st.caption(
             "식사는 음식 한 종류당 한 행이야. "
