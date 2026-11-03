@@ -1,13 +1,16 @@
 from datetime import date, datetime, timedelta
 from hashlib import sha256
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 import json
 
 import pandas as pd
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_local_now
+)
 from sidebar_menu import show_sidebar_menu
 
 
@@ -59,9 +62,7 @@ def update_note(client, user_id, profile_id, note_id, values):
         .update(
             {
                 **values,
-                "updated_at": datetime.now(
-                    ZoneInfo("Asia/Seoul")
-                ).isoformat()
+                "updated_at": get_local_now().isoformat()
             },
             returning="representation"
         )
@@ -119,11 +120,17 @@ div[data-testid="stForm"] {
 profile_menu = show_sidebar_menu("pages/visit.py")
 
 client, user = require_login()
+timezone_name = get_timezone_name()
 
 st.title("🏥 진료 노트")
+
 st.caption(
     "진료 전 질문과 관련 기록을 준비하고, "
     "진료 후 들은 설명과 다음 확인 사항을 함께 기록해요."
+)
+
+st.caption(
+    f"날짜·저장 시각 기준: {timezone_name}"
 )
 
 
@@ -202,8 +209,11 @@ with profile_menu:
 
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
+
 scope = f"{user.id}_{profile_id}"
-today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+ui_scope = f"{scope}_{timezone_name}"
+
+today = get_local_now().date()
 
 st.subheader(f"{profile['name']}의 진료 노트")
 
@@ -238,6 +248,7 @@ note_map = {
     for item in notes
 }
 
+# 홈에서 특정 노트를 여는 연결은 기존 키를 유지해요.
 choice_key = f"visit_choice_{scope}"
 pending_key = f"visit_pending_{scope}"
 
@@ -281,9 +292,33 @@ existing = note is not None
 form_version = fingerprint(note or {})
 
 
+# 시간대 변경으로 요약 날짜가 오늘보다 늦어진 경우 안내
+original_summary_start = (
+    date.fromisoformat(note["summary_start"])
+    if existing
+    else today - timedelta(days=29)
+)
+
+original_summary_end = (
+    date.fromisoformat(note["summary_end"])
+    if existing
+    else today
+)
+
+if existing and (
+    original_summary_start > today
+    or original_summary_end > today
+):
+    st.warning(
+        "저장된 요약 기간에 현재 시간대의 오늘보다 늦은 날짜가 있어요. "
+        "입력란에는 오늘까지로 표시했으니 수정 저장 전에 확인해 주세요. "
+        "저장된 노트의 기간은 저장 버튼을 누르기 전까지 유지돼요."
+    )
+
+
 # 노트 작성·수정
 with st.form(
-    f"visit_form_{scope}_{selected_id}_{form_version}"
+    f"visit_form_{ui_scope}_{selected_id}_{form_version}"
 ):
     title = st.text_input(
         "노트 제목",
@@ -310,21 +345,13 @@ with st.form(
 
     summary_start = c1.date_input(
         "기록 시작일",
-        value=(
-            date.fromisoformat(note["summary_start"])
-            if existing
-            else today - timedelta(days=29)
-        ),
+        value=min(original_summary_start, today),
         max_value=today
     )
 
     summary_end = c2.date_input(
         "기록 종료일",
-        value=(
-            date.fromisoformat(note["summary_end"])
-            if existing
-            else today
-        ),
+        value=min(original_summary_end, today),
         max_value=today
     )
 
@@ -350,6 +377,7 @@ with st.form(
     )
 
     st.markdown("### 📝 진료 후 기록")
+
     st.caption(
         "진료 전에는 비워 두었다가, "
         "진료를 마친 후 같은 노트에 추가할 수 있어요."
@@ -455,11 +483,13 @@ if save:
 
         else:
             st.session_state[pending_key] = target_id
+
             st.session_state.visit_notice = (
                 user.id,
                 profile_id,
                 "진료 노트를 저장했어요."
             )
+
             st.rerun()
 
 
@@ -508,21 +538,27 @@ with st.expander("🗑️ 이 진료 노트 삭제"):
                     )
 
             except Exception as error:
-                show_error("삭제 결과를 확인하지 못했어요.", error)
+                show_error(
+                    "삭제 결과를 확인하지 못했어요.",
+                    error
+                )
 
             else:
                 st.session_state[pending_key] = "new"
+
                 st.session_state.visit_notice = (
                     user.id,
                     profile_id,
                     "진료 노트를 삭제했어요."
                 )
+
                 st.rerun()
 
 
 # 저장된 노트의 기간으로 요약
 st.divider()
 st.subheader("📋 저장된 노트의 기록 요약")
+
 st.caption(
     f"{note['summary_start']} ~ {note['summary_end']} · "
     "기간을 바꿨다면 위의 수정 내용 저장 버튼을 눌러 주세요."
@@ -560,14 +596,24 @@ try:
     )
 
 except Exception as error:
-    show_error("기록 요약을 불러오지 못했어요.", error)
+    show_error(
+        "기록 요약을 불러오지 못했어요.",
+        error
+    )
     st.stop()
 
 
 c1, c2 = st.columns(2)
 
-c1.metric("혈당 기록", f"{len(glucose_rows)}건")
-c2.metric("식사·활동 기록", f"{len(lifestyle_rows)}건")
+c1.metric(
+    "혈당 기록",
+    f"{len(glucose_rows)}건"
+)
+
+c2.metric(
+    "식사·활동 기록",
+    f"{len(lifestyle_rows)}건"
+)
 
 summary = pd.DataFrame()
 
@@ -578,9 +624,13 @@ if glucose_rows:
         frame["glucose"],
         errors="coerce"
     )
+
     frame["meal"] = frame["meal"].fillna("미입력")
 
-    invalid_count = int(frame["glucose"].isna().sum())
+    invalid_count = int(
+        frame["glucose"].isna().sum()
+    )
+
     frame = frame.dropna(subset=["glucose"])
 
     if not frame.empty:
@@ -599,8 +649,14 @@ if glucose_rows:
 
         summary.index.name = "측정 시점"
 
-        st.markdown("**측정 시점별 혈당 요약 · 단위 mg/dL**")
-        st.dataframe(summary, use_container_width=True)
+        st.markdown(
+            "**측정 시점별 혈당 요약 · 단위 mg/dL**"
+        )
+
+        st.dataframe(
+            summary,
+            use_container_width=True
+        )
 
     if invalid_count:
         st.caption(
@@ -609,7 +665,9 @@ if glucose_rows:
         )
 
 else:
-    st.info("선택한 기간에 혈당 기록이 없어요.")
+    st.info(
+        "선택한 기간에 혈당 기록이 없어요."
+    )
 
 kind_labels = {
     "meal": "식사 — 음식 항목",
@@ -634,6 +692,7 @@ if lifestyle_rows:
     )
 
     st.markdown("**식사·활동 기록 현황**")
+
     st.dataframe(
         lifestyle_summary,
         use_container_width=True
@@ -689,20 +748,30 @@ if glucose_rows:
         ))
 
         if not selected_ids:
-            st.warning("표에서 기록을 먼저 선택해 주세요.")
+            st.warning(
+                "표에서 기록을 먼저 선택해 주세요."
+            )
 
         elif len(combined) > 100:
-            st.warning("한 노트에는 최대 100건까지 골라둘 수 있어요.")
+            st.warning(
+                "한 노트에는 최대 100건까지 골라둘 수 있어요."
+            )
 
         else:
             try:
                 update_note(
-                    client, user.id, profile_id, selected_id,
+                    client,
+                    user.id,
+                    profile_id,
+                    selected_id,
                     {"pinned_record_ids": combined}
                 )
 
             except Exception as error:
-                show_error("선택 목록을 저장하지 못했어요.", error)
+                show_error(
+                    "선택 목록을 저장하지 못했어요.",
+                    error
+                )
 
             else:
                 st.session_state.visit_notice = (
@@ -710,10 +779,11 @@ if glucose_rows:
                     profile_id,
                     "선택한 혈당 기록을 노트에 추가했어요."
                 )
+
                 st.rerun()
 
 
-# 골라둔 기록은 요약 기간 밖이어도 별도로 조회한다.
+# 골라둔 기록은 요약 기간 밖이어도 별도로 조회
 pinned_rows = []
 
 try:
@@ -736,7 +806,10 @@ try:
         pinned_rows.extend(batch)
 
 except Exception as error:
-    show_error("골라둔 혈당 기록을 불러오지 못했어요.", error)
+    show_error(
+        "골라둔 혈당 기록을 불러오지 못했어요.",
+        error
+    )
     st.stop()
 
 pinned_rows.sort(
@@ -757,7 +830,9 @@ if pinned_rows:
     )
 
 else:
-    st.caption("현재 확인 가능한 선택 기록이 없어요.")
+    st.caption(
+        "현재 확인 가능한 선택 기록이 없어요."
+    )
 
 if len(pinned_rows) < len(pinned_ids):
     st.caption(
@@ -775,7 +850,10 @@ if pinned_ids:
         row = pinned_map.get(record_id)
 
         if row is None:
-            return f"현재 참조할 수 없는 기록 · {record_id[:8]}"
+            return (
+                "현재 참조할 수 없는 기록 · "
+                f"{record_id[:8]}"
+            )
 
         return (
             f"{row['measure_date']} "
@@ -800,12 +878,17 @@ if pinned_ids:
         key=f"visit_remove_button_{scope}_{selected_id}"
     ):
         if not to_remove:
-            st.warning("목록에서 뺄 기록을 선택해 주세요.")
+            st.warning(
+                "목록에서 뺄 기록을 선택해 주세요."
+            )
 
         else:
             try:
                 update_note(
-                    client, user.id, profile_id, selected_id,
+                    client,
+                    user.id,
+                    profile_id,
+                    selected_id,
                     {
                         "pinned_record_ids": [
                             item for item in pinned_ids
@@ -815,7 +898,10 @@ if pinned_ids:
                 )
 
             except Exception as error:
-                show_error("선택 목록을 변경하지 못했어요.", error)
+                show_error(
+                    "선택 목록을 변경하지 못했어요.",
+                    error
+                )
 
             else:
                 st.session_state.visit_notice = (
@@ -823,6 +909,7 @@ if pinned_ids:
                     profile_id,
                     "노트의 선택 목록에서 뺐어요. 원래 혈당 기록은 유지돼요."
                 )
+
                 st.rerun()
 
 
@@ -830,10 +917,17 @@ if pinned_ids:
 st.divider()
 st.subheader("📥 진료 노트 다운로드")
 
-kind = profile.get("animal_type") or profile["profile_type"]
+kind = (
+    profile.get("animal_type")
+    or profile["profile_type"]
+)
+
+export_now = get_local_now()
 
 lines = [
     "당당케어 진료 노트",
+    f"자료 생성 시각: {export_now:%Y-%m-%d %H:%M} ({timezone_name})",
+    "측정 기록의 날짜·시간은 저장된 값을 그대로 표시함",
     "",
     f"대상: {profile['name']} · {kind}",
     f"제목: {note['title']}",
@@ -878,7 +972,10 @@ for code, label in kind_labels.items():
         row["record_type"] == code
         for row in lifestyle_rows
     )
-    lines.append(f"- {label}: {count}건")
+
+    lines.append(
+        f"- {label}: {count}건"
+    )
 
 lines.extend([
     "",
@@ -897,11 +994,13 @@ for row in pinned_rows:
     )
 
 if not pinned_rows:
-    lines.append("현재 확인 가능한 선택 기록 없음")
+    lines.append(
+        "현재 확인 가능한 선택 기록 없음"
+    )
 
 if len(pinned_rows) < len(pinned_ids):
     lines.append(
-        f"현재 참조할 수 없는 선택 기록: "
+        "현재 참조할 수 없는 선택 기록: "
         f"{len(pinned_ids) - len(pinned_rows)}건"
     )
 
