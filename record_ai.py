@@ -1,7 +1,5 @@
-from datetime import datetime
 from hashlib import sha256
 from statistics import mean, median
-from zoneinfo import ZoneInfo
 import json
 import math
 import time
@@ -13,8 +11,10 @@ from openai import (
     APIStatusError,
     APITimeoutError,
     AuthenticationError,
-    RateLimitError
+    RateLimitError,
 )
+
+from app_shared import get_local_now, get_timezone_name
 
 
 MODEL = "gemini-3.5-flash-lite"
@@ -61,7 +61,7 @@ def fingerprint(value):
             value,
             sort_keys=True,
             ensure_ascii=False,
-            allow_nan=False
+            allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
 
@@ -83,14 +83,16 @@ def prepare_records(payload):
         raise ValueError("식사·활동 기록 형식을 확인해 줘.")
 
     if not blood_rows and not lifestyle_rows:
-        raise ValueError("선택한 기간에 분석할 기록이 없어.")
+        raise ValueError(
+            "선택한 기간에 분석할 기록이 없어."
+        )
 
     blood_fields = [
         "date",
         "time",
         "glucose_mg_dl",
         "measurement_context",
-        "insulin_units"
+        "insulin_units",
     ]
 
     lifestyle_fields = [
@@ -102,14 +104,16 @@ def prepare_records(payload):
         "amount",
         "amount_unit",
         "duration_minutes",
-        "intensity"
+        "intensity",
     ]
 
     blood = []
 
     for row in blood_rows:
         if not isinstance(row, dict):
-            raise ValueError("혈당 기록 형식을 확인해 줘.")
+            raise ValueError(
+                "혈당 기록 형식을 확인해 줘."
+            )
 
         blood.append({
             field: row.get(field)
@@ -120,29 +124,33 @@ def prepare_records(payload):
 
     for row in lifestyle_rows:
         if not isinstance(row, dict):
-            raise ValueError("식사·활동 기록 형식을 확인해 줘.")
+            raise ValueError(
+                "식사·활동 기록 형식을 확인해 줘."
+            )
 
         lifestyle.append({
             field: row.get(field)
             for field in lifestyle_fields
         })
 
-    # 필요한 항목만 새로 구성해 이름·계정 ID·메모 등은 제외한다.
+    # 필요한 항목만 새로 구성해 이름·계정 ID·메모 등은 제외
     clean_subject = {
-        "profile_type": subject.get("profile_type")
+        "profile_type": subject.get("profile_type"),
     }
 
     if subject.get("profile_type") == "반려동물":
-        clean_subject["animal_type"] = subject.get("animal_type")
+        clean_subject["animal_type"] = (
+            subject.get("animal_type")
+        )
 
     return {
         "subject": clean_subject,
         "period": {
             "start": period.get("start"),
-            "end": period.get("end")
+            "end": period.get("end"),
         },
         "blood_glucose": blood,
-        "lifestyle": lifestyle
+        "lifestyle": lifestyle,
     }
 
 
@@ -162,14 +170,16 @@ def calculate_summary(records):
             excluded_count += 1
             continue
 
-        label = row.get("measurement_context") or "미입력"
+        label = (
+            row.get("measurement_context") or "미입력"
+        )
 
         group = groups.setdefault(
             label,
             {
                 "values": [],
-                "dates": set()
-            }
+                "dates": set(),
+            },
         )
 
         group["values"].append(value)
@@ -188,7 +198,7 @@ def calculate_summary(records):
             "mean_mg_dl": round(mean(values), 1),
             "median_mg_dl": round(median(values), 1),
             "minimum_mg_dl": min(values),
-            "maximum_mg_dl": max(values)
+            "maximum_mg_dl": max(values),
         }
 
     lifestyle_counts = {}
@@ -201,29 +211,39 @@ def calculate_summary(records):
         )
 
     return {
-        "blood_record_count": len(records["blood_glucose"]),
-        "blood_statistics_by_measurement_context": blood_summary,
-        "blood_records_excluded_from_statistics": excluded_count,
+        "blood_record_count": len(
+            records["blood_glucose"]
+        ),
+        "blood_statistics_by_measurement_context": (
+            blood_summary
+        ),
+        "blood_records_excluded_from_statistics": (
+            excluded_count
+        ),
         "lifestyle_record_counts": lifestyle_counts,
         "notes": [
             "식사 건수는 식사 횟수가 아니라 음식 항목 수이다.",
             "활동 미입력은 활동하지 않았다는 뜻이 아니다.",
             "수면은 잠들기 시작한 날짜를 기준으로 조회했다.",
-            "날짜와 시간의 근접성은 인과관계를 증명하지 않는다."
-        ]
+            "날짜와 시간의 근접성은 인과관계를 증명하지 않는다.",
+        ],
     }
 
 
-def request_record_analysis(api_key, records, question):
+def request_record_analysis(
+    api_key,
+    records,
+    question,
+):
     content = {
         "records": records,
-        "calculated_summary": calculate_summary(records)
+        "calculated_summary": calculate_summary(records),
     }
 
     encoded = json.dumps(
         content,
         ensure_ascii=False,
-        allow_nan=False
+        allow_nan=False,
     )
 
     if len(encoded) > 50000:
@@ -236,14 +256,14 @@ def request_record_analysis(api_key, records, question):
         api_key=api_key,
         base_url=BASE_URL,
         timeout=60.0,
-        max_retries=0
+        max_retries=0,
     ) as ai_client:
         completion = ai_client.chat.completions.create(
             model=MODEL,
             messages=[
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT
+                    "content": SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
@@ -252,14 +272,16 @@ def request_record_analysis(api_key, records, question):
                         + encoded
                         + "\n\n사용자 질문:\n"
                         + question
-                    )
-                }
+                    ),
+                },
             ],
-            max_tokens=3000
+            max_tokens=3000,
         )
 
     if not completion.choices:
-        raise ValueError("분석 답변을 받지 못했어.")
+        raise ValueError(
+            "분석 답변을 받지 못했어."
+        )
 
     choice = completion.choices[0]
     answer = choice.message.content
@@ -272,11 +294,15 @@ def request_record_analysis(api_key, records, question):
 
     return {
         "answer": answer.strip(),
-        "truncated": choice.finish_reason == "length"
+        "truncated": choice.finish_reason == "length",
     }
 
 
-def show_record_analysis(user_id, profile_id, payload):
+def show_record_analysis(
+    user_id,
+    profile_id,
+    payload,
+):
     st.divider()
     st.subheader("🔍 선택한 기록으로 질문하기")
 
@@ -291,14 +317,20 @@ def show_record_analysis(user_id, profile_id, payload):
         records = prepare_records(payload)
         version = fingerprint(records)
 
-    except (TypeError, ValueError, OverflowError) as error:
+    except (
+        TypeError,
+        ValueError,
+        OverflowError,
+    ) as error:
         st.warning(str(error))
         return
 
     scope = f"{user_id}_{profile_id}"
+
     result_key = f"record_ai_result_{scope}"
     last_request_key = f"record_ai_last_request_{scope}"
 
+    timezone_name = get_timezone_name()
     period = records["period"]
 
     st.caption(
@@ -313,6 +345,11 @@ def show_record_analysis(user_id, profile_id, payload):
         "전송 내용에는 건강정보가 포함돼."
     )
 
+    st.caption(
+        f"새 분석 답변의 생성 시각 기준: {timezone_name}. "
+        "전송하는 기록의 날짜·시간은 저장된 값을 그대로 사용해."
+    )
+
     question = st.text_area(
         "이 기록으로 궁금한 점",
         value=(
@@ -322,13 +359,13 @@ def show_record_analysis(user_id, profile_id, payload):
         ),
         max_chars=3000,
         height=120,
-        key=f"record_ai_question_{scope}"
+        key=f"record_ai_question_{scope}",
     )
 
     confirmed = st.checkbox(
         "표시한 기간의 건강기록과 질문이 "
         "Google Gemini로 전송되는 것을 확인했어.",
-        key=f"record_ai_confirm_{scope}_{version}"
+        key=f"record_ai_confirm_{scope}_{version}",
     )
 
     api_key = str(
@@ -344,7 +381,7 @@ def show_record_analysis(user_id, profile_id, payload):
         "선택한 기록과 질문을 Gemini로 전송",
         disabled=not confirmed or not api_key,
         use_container_width=True,
-        key=f"record_ai_analyze_{scope}"
+        key=f"record_ai_analyze_{scope}",
     )
 
     if analyze:
@@ -352,11 +389,13 @@ def show_record_analysis(user_id, profile_id, payload):
 
         previous_request = st.session_state.get(
             last_request_key,
-            0.0
+            0.0,
         )
 
         if not cleaned_question:
-            st.warning("궁금한 내용을 입력해 줘.")
+            st.warning(
+                "궁금한 내용을 입력해 줘."
+            )
 
         elif time.monotonic() - previous_request < 20:
             st.warning(
@@ -364,14 +403,19 @@ def show_record_analysis(user_id, profile_id, payload):
             )
 
         else:
-            st.session_state[last_request_key] = time.monotonic()
+            # 요청 간격은 시간대 변경의 영향을 받지 않도록 유지
+            st.session_state[last_request_key] = (
+                time.monotonic()
+            )
 
             try:
-                with st.spinner("선택한 기록을 정리하고 있어…"):
+                with st.spinner(
+                    "선택한 기록을 정리하고 있어…"
+                ):
                     response = request_record_analysis(
                         api_key=api_key,
                         records=records,
-                        question=cleaned_question
+                        question=cleaned_question,
                     )
 
             except AuthenticationError:
@@ -434,9 +478,10 @@ def show_record_analysis(user_id, profile_id, payload):
                     "question": cleaned_question,
                     "answer": response["answer"],
                     "truncated": response["truncated"],
-                    "created_at": datetime.now(
-                        ZoneInfo("Asia/Seoul")
-                    ).strftime("%Y-%m-%d %H:%M")
+                    "created_at": get_local_now().strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
+                    "timezone": timezone_name,
                 }
 
     result = st.session_state.get(result_key)
@@ -451,7 +496,20 @@ def show_record_analysis(user_id, profile_id, payload):
 
         else:
             st.markdown("### 📝 기록 요약 답변")
-            st.caption(f"생성 시각: {result['created_at']}")
+
+            result_timezone = result.get("timezone")
+
+            if result_timezone:
+                st.caption(
+                    f"생성 시각: {result['created_at']} "
+                    f"({result_timezone})"
+                )
+
+            else:
+                st.caption(
+                    f"생성 시각: {result['created_at']} "
+                    "· 이전 형식의 결과로 생성 시간대가 저장되어 있지 않아."
+                )
 
             st.markdown("**요청한 질문**")
             st.write(result["question"])
