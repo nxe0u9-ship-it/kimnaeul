@@ -8,17 +8,12 @@ MENU_ITEMS = [
     ("pages/lifestyle.py", "식사·활동 기록", "📝"),
     ("pages/meal.py", "냉장고 식단 추천", "🍽️"),
     ("pages/explore.py", "내 기록 탐구실", "🔍"),
-    ("pages/visit.py", "진료 준비 노트", "🏥"),
+    ("pages/visit.py", "진료 노트", "🏥"),
     ("pages/chat.py", "AI에게 물어보기", "💬")
 ]
 
 
 def show_sidebar_menu(current_page):
-    """
-    현재 페이지 메뉴 바로 아래에 관리 대상 표시 공간을 만든다.
-
-    반환된 컨테이너 안에 각 페이지의 관리 대상 선택 버튼을 표시한다.
-    """
     valid_paths = {
         path
         for path, label, icon in MENU_ITEMS
