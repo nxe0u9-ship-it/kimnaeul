@@ -57,9 +57,7 @@ div.stButton > button {
 """, unsafe_allow_html=True)
 
 
-# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/home.py")
-
 
 client, user = require_login()
 
@@ -367,7 +365,7 @@ else:
     if not visit_rows:
         st.info(
             "앞으로 30일 안에 예정된 미완료 진료 노트가 없어요. "
-            "진료 준비 노트에서 예정일을 저장하면 여기에 표시돼요."
+            "진료 노트에서 예정일을 저장하면 여기에 표시돼요."
         )
 
     for visit in visit_rows[:20]:
@@ -409,13 +407,19 @@ else:
     if len(visit_rows) > 20:
         st.caption(
             "가까운 예정일부터 최대 20건 표시해요. "
-            "나머지 노트는 진료 준비 페이지에서 확인해 주세요."
+            "나머지 노트는 진료 노트 페이지에서 확인해 주세요."
         )
 
 st.page_link(
     "pages/visit.py",
-    label="진료 준비 노트 작성·관리하기",
+    label="진료 노트 작성·관리하기",
     icon="🏥"
+)
+
+st.caption(
+    "진료 전에는 질문과 전달할 내용을 준비하고, "
+    "진료 후에는 들은 설명과 다음 진료까지 확인할 내용을 "
+    "같은 노트에 기록할 수 있어요."
 )
 
 
