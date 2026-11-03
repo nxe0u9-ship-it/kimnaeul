@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from hashlib import sha256
 from uuid import uuid4
 import json
@@ -9,21 +9,95 @@ import streamlit as st
 from app_shared import (
     require_login,
     get_timezone_name,
-    get_local_now
+    get_local_now,
 )
 from sidebar_menu import show_sidebar_menu
+
+
+NOTE_MODES = (
+    "진료 준비",
+    "진료 일정 저장",
+    "진료 후 기록",
+)
+
+
+def default_note_mode(note):
+    if note and (
+        note.get("completed")
+        or note.get("consultation_notes")
+        or note.get("followup_notes")
+    ):
+        return "진료 후 기록"
+
+    return "진료 준비"
+
+
+def build_note_values(mode, fields, note=None):
+    if mode not in NOTE_MODES:
+        raise ValueError("작성 모드를 확인해 주세요.")
+
+    if note is None:
+        values = {
+            "summary_start": fields["summary_start"].isoformat(),
+            "summary_end": fields["summary_end"].isoformat(),
+            "questions": "",
+            "memo": "",
+            "consultation_notes": "",
+            "followup_notes": "",
+            "completed": False,
+        }
+    else:
+        values = {}
+
+    values.update({
+        "title": fields["title"].strip(),
+        "visit_date": (
+            fields["visit_date"].isoformat()
+            if fields["visit_date"] is not None
+            else None
+        ),
+    })
+
+    # 일정 모드에서는 기존 질문·진료 후 내용 등을 수정하지 않아요.
+    if mode == "진료 일정 저장":
+        return values
+
+    values.update({
+        "summary_start": fields["summary_start"].isoformat(),
+        "summary_end": fields["summary_end"].isoformat(),
+    })
+
+    if mode == "진료 준비":
+        values.update({
+            "questions": fields["questions"].strip(),
+            "memo": fields["memo"].strip(),
+        })
+
+    else:
+        values.update({
+            "consultation_notes": (
+                fields["consultation_notes"].strip()
+            ),
+            "followup_notes": fields["followup_notes"].strip(),
+            "completed": fields["completed"],
+        })
+
+    return values
 
 
 def fingerprint(value):
     return sha256(
         json.dumps(
-            value, sort_keys=True, default=str
+            value,
+            sort_keys=True,
+            default=str,
         ).encode()
     ).hexdigest()[:16]
 
 
 def show_error(message, error):
     st.error(message)
+
     st.caption(
         f"오류 종류: {type(error).__name__} / "
         f"오류 코드: {getattr(error, 'code', None) or '없음'}"
@@ -56,15 +130,21 @@ def fetch_all(make_query):
         offset += len(batch)
 
 
-def update_note(client, user_id, profile_id, note_id, values):
+def update_note(
+    client,
+    user_id,
+    profile_id,
+    note_id,
+    values,
+):
     result = (
         client.table("visit_notes")
         .update(
             {
                 **values,
-                "updated_at": get_local_now().isoformat()
+                "updated_at": get_local_now().isoformat(),
             },
-            returning="representation"
+            returning="representation",
         )
         .eq("user_id", user_id)
         .eq("profile_id", profile_id)
@@ -87,7 +167,7 @@ def blood_table(rows):
             "혈당 (mg/dL)": row["glucose"],
             "측정 시점": row.get("meal") or "미입력",
             "인슐린 (단위)": row.get("insulin"),
-            "메모": row.get("memo") or ""
+            "메모": row.get("memo") or "",
         }
         for row in rows
     ])
@@ -96,12 +176,14 @@ def blood_table(rows):
 st.set_page_config(
     page_title="진료 노트 | 당당케어",
     page_icon="🏥",
-    layout="wide"
+    layout="wide",
 )
 
 st.markdown("""
 <style>
-.stApp { background-color: #FFF9F9; }
+.stApp {
+    background-color: #FFF9F9;
+}
 
 div.stButton > button {
     border-radius: 14px;
@@ -125,8 +207,8 @@ timezone_name = get_timezone_name()
 st.title("🏥 진료 노트")
 
 st.caption(
-    "진료 전 질문과 관련 기록을 준비하고, "
-    "진료 후 들은 설명과 다음 확인 사항을 함께 기록해요."
+    "작성 목적을 선택해 진료를 준비하거나 일정을 저장하고, "
+    "진료 후 들은 설명과 다음 확인 사항을 기록해요."
 )
 
 st.caption(
@@ -148,17 +230,19 @@ try:
 except Exception as error:
     show_error(
         "관리 대상을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
 if not profiles:
     st.info("먼저 관리 대상을 등록해 주세요.")
+
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
-        icon="➕"
+        icon="➕",
     )
+
     st.stop()
 
 profile_map = {
@@ -201,7 +285,7 @@ with profile_menu:
             label,
             key=f"visit_profile_{user.id}_{item['id']}",
             type="primary" if active else "secondary",
-            use_container_width=True
+            use_container_width=True,
         ):
             st.session_state.active_profile = item["id"]
             st.rerun()
@@ -239,7 +323,7 @@ try:
 except Exception as error:
     show_error(
         "진료 노트를 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
@@ -248,7 +332,7 @@ note_map = {
     for item in notes
 }
 
-# 홈에서 특정 노트를 여는 연결은 기존 키를 유지해요.
+# 홈에서 특정 노트를 여는 연결 유지
 choice_key = f"visit_choice_{scope}"
 pending_key = f"visit_pending_{scope}"
 
@@ -283,7 +367,7 @@ selected_id = st.selectbox(
     "진료 노트 선택",
     options,
     format_func=note_label,
-    key=choice_key
+    key=choice_key,
 )
 
 note = note_map.get(selected_id)
@@ -292,7 +376,38 @@ existing = note is not None
 form_version = fingerprint(note or {})
 
 
-# 시간대 변경으로 요약 날짜가 오늘보다 늦어진 경우 안내
+# 작성 모드를 양식 밖에서 먼저 선택
+mode_key = f"visit_mode_{scope}_{selected_id}"
+
+mode = st.radio(
+    "무엇을 작성할까요?",
+    NOTE_MODES,
+    index=NOTE_MODES.index(default_note_mode(note)),
+    horizontal=True,
+    key=mode_key,
+)
+
+mode_descriptions = {
+    "진료 준비": (
+        "진료 때 물어볼 질문과 전달할 내용, "
+        "관련 기록 기간을 작성해요."
+    ),
+    "진료 일정 저장": (
+        "제목과 진료 예정일만 입력해 일정을 저장해요."
+    ),
+    "진료 후 기록": (
+        "실제 진료일과 들은 설명, "
+        "다음 확인 사항을 기록해요."
+    ),
+}
+
+st.info(mode_descriptions[mode])
+
+st.caption(
+    "다른 모드로 바꾸기 전에 현재 입력을 저장해 주세요. "
+    "저장된 같은 노트를 다른 모드로 열어 이어서 작성할 수 있어요."
+)
+
 original_summary_start = (
     date.fromisoformat(note["summary_start"])
     if existing
@@ -305,153 +420,279 @@ original_summary_end = (
     else today
 )
 
-if existing and (
-    original_summary_start > today
-    or original_summary_end > today
+if (
+    mode != "진료 일정 저장"
+    and existing
+    and (
+        original_summary_start > today
+        or original_summary_end > today
+    )
 ):
     st.warning(
         "저장된 요약 기간에 현재 시간대의 오늘보다 늦은 날짜가 있어요. "
         "입력란에는 오늘까지로 표시했으니 수정 저장 전에 확인해 주세요. "
-        "저장된 노트의 기간은 저장 버튼을 누르기 전까지 유지돼요."
+        "저장된 기간은 저장 버튼을 누르기 전까지 유지돼요."
     )
 
 
-# 노트 작성·수정
+# 숨겨진 항목에는 기존 값을 준비해 두고,
+# 실제 저장 시 현재 모드에 해당하는 항목만 수정
+summary_start = original_summary_start
+summary_end = original_summary_end
+
+questions = (
+    (note.get("questions") or "")
+    if existing
+    else ""
+)
+
+memo = (
+    (note.get("memo") or "")
+    if existing
+    else ""
+)
+
+consultation_notes = (
+    (note.get("consultation_notes") or "")
+    if existing
+    else ""
+)
+
+followup_notes = (
+    (note.get("followup_notes") or "")
+    if existing
+    else ""
+)
+
+completed = (
+    bool(note.get("completed"))
+    if existing
+    else False
+)
+
+
+# 선택한 모드에 맞는 작성 화면
 with st.form(
-    f"visit_form_{ui_scope}_{selected_id}_{form_version}"
+    f"visit_form_{ui_scope}_{selected_id}_{form_version}_{mode}"
 ):
     title = st.text_input(
-        "노트 제목",
-        value=note["title"] if existing else "진료 노트",
-        max_chars=100
+        "일정 제목"
+        if mode == "진료 일정 저장"
+        else "노트 제목",
+        value=(
+            note["title"]
+            if existing
+            else (
+                "진료 일정"
+                if mode == "진료 일정 저장"
+                else "진료 노트"
+            )
+        ),
+        max_chars=100,
     )
 
+    date_labels = {
+        "진료 준비": "진료 예정일(선택)",
+        "진료 일정 저장": "진료 예정일(필수)",
+        "진료 후 기록": "실제 진료일(필수)",
+    }
+
     visit_date = st.date_input(
-        "진료일·예정일(선택)",
+        date_labels[mode],
         value=(
             date.fromisoformat(note["visit_date"])
             if existing and note.get("visit_date")
-            else None
+            else (
+                today
+                if mode == "진료 후 기록"
+                else None
+            )
         ),
         help=(
-            "진료 전에는 예정일을, "
-            "진료 후에는 실제 진료일을 입력해 주세요."
+            "진료 후 기록에는 실제 진료받은 날짜를 입력해 주세요."
+            if mode == "진료 후 기록"
+            else "예약한 진료 날짜를 입력해 주세요."
+        ),
+    )
+
+    if mode != "진료 일정 저장":
+        st.markdown(
+            "**이 진료와 관련된 기록의 기간**"
         )
-    )
 
-    st.markdown("**이 진료와 관련된 기록의 기간**")
+        c1, c2 = st.columns(2)
 
-    c1, c2 = st.columns(2)
+        summary_start = c1.date_input(
+            "기록 시작일",
+            value=min(original_summary_start, today),
+            max_value=today,
+        )
 
-    summary_start = c1.date_input(
-        "기록 시작일",
-        value=min(original_summary_start, today),
-        max_value=today
-    )
+        summary_end = c2.date_input(
+            "기록 종료일",
+            value=min(original_summary_end, today),
+            max_value=today,
+        )
 
-    summary_end = c2.date_input(
-        "기록 종료일",
-        value=min(original_summary_end, today),
-        max_value=today
-    )
+    if mode == "진료 준비":
+        st.markdown("### 📋 진료 전 준비")
 
-    st.markdown("### 📋 진료 전 준비")
+        questions = st.text_area(
+            "진료 때 물어볼 질문",
+            value=questions,
+            placeholder=(
+                "질문을 한 줄에 하나씩 입력해 주세요.\n"
+                "예: 집에서 측정할 때 주의할 점은 무엇인가요?"
+            ),
+            height=150,
+            max_chars=10000,
+        )
 
-    questions = st.text_area(
-        "진료 때 물어볼 질문",
-        value=note.get("questions", "") if existing else "",
-        placeholder=(
-            "질문을 한 줄에 하나씩 입력해 주세요.\n"
-            "예: 집에서 측정할 때 주의할 점은 무엇인가요?"
-        ),
-        height=150,
-        max_chars=10000
-    )
+        memo = st.text_area(
+            "의료진·수의사에게 전달할 내용",
+            value=memo,
+            placeholder=(
+                "관찰한 변화나 전달할 내용을 입력해 주세요."
+            ),
+            height=120,
+            max_chars=10000,
+        )
 
-    memo = st.text_area(
-        "의료진·수의사에게 전달할 내용",
-        value=note.get("memo", "") if existing else "",
-        placeholder="관찰한 변화나 전달할 내용을 입력해 주세요.",
-        height=120,
-        max_chars=10000
-    )
+        if existing and (
+            note.get("consultation_notes")
+            or note.get("followup_notes")
+        ):
+            st.caption(
+                "기존 진료 후 기록은 그대로 보관돼요."
+            )
 
-    st.markdown("### 📝 진료 후 기록")
+    elif mode == "진료 일정 저장":
+        st.caption(
+            "질문이나 진료 후 내용을 입력하지 않아도 저장할 수 있어요. "
+            "기존 노트의 질문·기록 기간·진료 후 내용·완료 상태는 유지돼요."
+        )
 
-    st.caption(
-        "진료 전에는 비워 두었다가, "
-        "진료를 마친 후 같은 노트에 추가할 수 있어요."
-    )
+    else:
+        st.markdown("### 📝 진료 후 기록")
 
-    consultation_notes = st.text_area(
-        "진료에서 들은 설명·안내",
-        value=(
-            (note.get("consultation_notes") or "")
-            if existing
-            else ""
-        ),
-        placeholder=(
-            "의료진·수의사에게 들은 설명, 검사 결과 안내, "
-            "질문에 대한 답변 등을 기록해 주세요."
-        ),
-        height=180,
-        max_chars=10000
-    )
+        if existing and (
+            note.get("questions")
+            or note.get("memo")
+        ):
+            with st.expander(
+                "📋 저장된 진료 준비 내용 보기"
+            ):
+                st.markdown("**진료 때 물어볼 질문**")
+                st.write(
+                    note.get("questions") or "미입력"
+                )
 
-    followup_notes = st.text_area(
-        "다음 진료까지 확인할 내용",
-        value=(
-            (note.get("followup_notes") or "")
-            if existing
-            else ""
-        ),
-        placeholder=(
-            "안내받은 관리 방법, 관찰할 변화, "
-            "다음 진료 때 확인할 질문 등을 기록해 주세요."
-        ),
-        height=140,
-        max_chars=10000
-    )
+                st.markdown("**전달할 내용**")
+                st.write(
+                    note.get("memo") or "미입력"
+                )
 
-    completed = st.checkbox(
-        "이 진료를 마쳤어요.",
-        value=bool(note.get("completed")) if existing else False
-    )
+        consultation_notes = st.text_area(
+            "진료에서 들은 설명·안내",
+            value=consultation_notes,
+            placeholder=(
+                "의료진·수의사에게 들은 설명, 검사 결과 안내, "
+                "질문에 대한 답변 등을 기록해 주세요."
+            ),
+            height=180,
+            max_chars=10000,
+        )
+
+        followup_notes = st.text_area(
+            "다음 진료까지 확인할 내용",
+            value=followup_notes,
+            placeholder=(
+                "안내받은 관리 방법, 관찰할 변화, "
+                "다음 진료 때 확인할 질문 등을 기록해 주세요."
+            ),
+            height=140,
+            max_chars=10000,
+        )
+
+        completed = st.checkbox(
+            "이 진료를 마쳤어요.",
+            value=completed if existing else True,
+        )
+
+    save_labels = {
+        "진료 준비": "💾 진료 준비 내용 저장",
+        "진료 일정 저장": "📅 진료 일정 저장",
+        "진료 후 기록": "💾 진료 후 기록 저장",
+    }
 
     save = st.form_submit_button(
-        "💾 노트 저장" if not existing else "💾 수정 내용 저장",
-        use_container_width=True
+        save_labels[mode],
+        use_container_width=True,
     )
 
 
 if save:
     if not title.strip():
-        st.warning("노트 제목을 입력해 주세요.")
+        st.warning("제목을 입력해 주세요.")
 
-    elif summary_start > summary_end:
-        st.warning("기록 시작일은 종료일보다 늦을 수 없어요.")
+    elif mode != "진료 준비" and visit_date is None:
+        st.warning("진료 날짜를 입력해 주세요.")
 
-    elif (summary_end - summary_start).days > 365:
-        st.warning("기록 요약 기간은 최대 366일로 설정해 주세요.")
+    elif (
+        mode == "진료 후 기록"
+        and visit_date > get_local_now().date()
+    ):
+        st.warning(
+            "진료 후 기록의 실제 진료일은 오늘보다 늦을 수 없어요. "
+            "앞으로의 일정은 ‘진료 일정 저장’ 모드에서 작성해 주세요."
+        )
+
+    elif (
+        mode != "진료 일정 저장"
+        and summary_start > summary_end
+    ):
+        st.warning(
+            "기록 시작일은 종료일보다 늦을 수 없어요."
+        )
+
+    elif (
+        mode != "진료 일정 저장"
+        and summary_end > get_local_now().date()
+    ):
+        st.warning(
+            "기록 종료일은 현재 시간대의 오늘보다 늦을 수 없어요."
+        )
+
+    elif (
+        mode != "진료 일정 저장"
+        and (summary_end - summary_start).days > 365
+    ):
+        st.warning(
+            "기록 요약 기간은 최대 366일로 설정해 주세요."
+        )
 
     else:
-        values = {
-            "title": title.strip(),
-            "visit_date": (
-                visit_date.isoformat()
-                if visit_date is not None
-                else None
-            ),
-            "summary_start": summary_start.isoformat(),
-            "summary_end": summary_end.isoformat(),
-            "questions": questions.strip(),
-            "memo": memo.strip(),
-            "consultation_notes": consultation_notes.strip(),
-            "followup_notes": followup_notes.strip(),
-            "completed": completed
-        }
+        values = build_note_values(
+            mode,
+            {
+                "title": title,
+                "visit_date": visit_date,
+                "summary_start": summary_start,
+                "summary_end": summary_end,
+                "questions": questions,
+                "memo": memo,
+                "consultation_notes": consultation_notes,
+                "followup_notes": followup_notes,
+                "completed": completed,
+            },
+            note=note,
+        )
 
-        target_id = selected_id if existing else str(uuid4())
+        target_id = (
+            selected_id
+            if existing
+            else str(uuid4())
+        )
 
         try:
             if existing:
@@ -460,7 +701,7 @@ if save:
                     user.id,
                     profile_id,
                     target_id,
-                    values
+                    values,
                 )
 
             else:
@@ -469,25 +710,30 @@ if save:
                         **values,
                         "id": target_id,
                         "user_id": user.id,
-                        "profile_id": profile_id
+                        "profile_id": profile_id,
                     },
-                    returning="minimal"
+                    returning="minimal",
                 ).execute()
 
         except Exception as error:
             show_error(
                 "저장 결과를 확인하지 못했어요. "
                 "페이지를 다시 열어 노트 목록을 확인해 주세요.",
-                error
+                error,
             )
 
         else:
+            if not existing:
+                st.session_state[
+                    f"visit_mode_{scope}_{target_id}"
+                ] = mode
+
             st.session_state[pending_key] = target_id
 
             st.session_state.visit_notice = (
                 user.id,
                 profile_id,
-                "진료 노트를 저장했어요."
+                f"{mode} 내용을 저장했어요.",
             )
 
             st.rerun()
@@ -515,11 +761,15 @@ with st.expander("🗑️ 이 진료 노트 삭제"):
             "이 진료 노트를 삭제하는 것을 확인했어요."
         )
 
-        delete = st.form_submit_button("진료 노트 삭제")
+        delete = st.form_submit_button(
+            "진료 노트 삭제"
+        )
 
     if delete:
         if not confirm_delete:
-            st.warning("삭제 확인란을 먼저 체크해 주세요.")
+            st.warning(
+                "삭제 확인란을 먼저 체크해 주세요."
+            )
 
         else:
             try:
@@ -534,13 +784,14 @@ with st.expander("🗑️ 이 진료 노트 삭제"):
 
                 if not result.data:
                     raise ValueError(
-                        "삭제된 노트가 없어요. 목록을 다시 확인해 주세요."
+                        "삭제된 노트가 없어요. "
+                        "목록을 다시 확인해 주세요."
                     )
 
             except Exception as error:
                 show_error(
                     "삭제 결과를 확인하지 못했어요.",
-                    error
+                    error,
                 )
 
             else:
@@ -549,7 +800,7 @@ with st.expander("🗑️ 이 진료 노트 삭제"):
                 st.session_state.visit_notice = (
                     user.id,
                     profile_id,
-                    "진료 노트를 삭제했어요."
+                    "진료 노트를 삭제했어요.",
                 )
 
                 st.rerun()
@@ -561,7 +812,7 @@ st.subheader("📋 저장된 노트의 기록 요약")
 
 st.caption(
     f"{note['summary_start']} ~ {note['summary_end']} · "
-    "기간을 바꿨다면 위의 수정 내용 저장 버튼을 눌러 주세요."
+    "기간을 바꿨다면 위의 저장 버튼을 눌러 주세요."
 )
 
 try:
@@ -598,7 +849,7 @@ try:
 except Exception as error:
     show_error(
         "기록 요약을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
@@ -607,12 +858,12 @@ c1, c2 = st.columns(2)
 
 c1.metric(
     "혈당 기록",
-    f"{len(glucose_rows)}건"
+    f"{len(glucose_rows)}건",
 )
 
 c2.metric(
     "식사·활동 기록",
-    f"{len(lifestyle_rows)}건"
+    f"{len(lifestyle_rows)}건",
 )
 
 summary = pd.DataFrame()
@@ -622,7 +873,7 @@ if glucose_rows:
 
     frame["glucose"] = pd.to_numeric(
         frame["glucose"],
-        errors="coerce"
+        errors="coerce",
     )
 
     frame["meal"] = frame["meal"].fillna("미입력")
@@ -642,7 +893,7 @@ if glucose_rows:
                 평균=("glucose", "mean"),
                 중앙값=("glucose", "median"),
                 최솟값=("glucose", "min"),
-                최댓값=("glucose", "max")
+                최댓값=("glucose", "max"),
             )
             .round(1)
         )
@@ -655,7 +906,7 @@ if glucose_rows:
 
         st.dataframe(
             summary,
-            use_container_width=True
+            use_container_width=True,
         )
 
     if invalid_count:
@@ -673,7 +924,7 @@ kind_labels = {
     "meal": "식사 — 음식 항목",
     "activity": "운동·산책",
     "sleep": "수면",
-    "no_activity": "활동 없음 확인"
+    "no_activity": "활동 없음 확인",
 }
 
 if lifestyle_rows:
@@ -681,7 +932,7 @@ if lifestyle_rows:
         pd.Series([
             kind_labels.get(
                 row["record_type"],
-                row["record_type"]
+                row["record_type"],
             )
             for row in lifestyle_rows
         ])
@@ -695,7 +946,7 @@ if lifestyle_rows:
 
     st.dataframe(
         lifestyle_summary,
-        use_container_width=True
+        use_container_width=True,
     )
 
 st.caption(
@@ -728,12 +979,12 @@ if glucose_rows:
         key=(
             f"visit_blood_{scope}_{selected_id}_"
             f"{fingerprint(glucose_rows)}_{fingerprint(pinned_ids)}"
-        )
+        ),
     )
 
     if st.button(
         "⭐ 선택한 기록을 노트에 추가",
-        key=f"visit_add_pins_{scope}_{selected_id}"
+        key=f"visit_add_pins_{scope}_{selected_id}",
     ):
         positions = event["selection"]["rows"]
 
@@ -764,20 +1015,20 @@ if glucose_rows:
                     user.id,
                     profile_id,
                     selected_id,
-                    {"pinned_record_ids": combined}
+                    {"pinned_record_ids": combined},
                 )
 
             except Exception as error:
                 show_error(
                     "선택 목록을 저장하지 못했어요.",
-                    error
+                    error,
                 )
 
             else:
                 st.session_state.visit_notice = (
                     user.id,
                     profile_id,
-                    "선택한 혈당 기록을 노트에 추가했어요."
+                    "선택한 혈당 기록을 노트에 추가했어요.",
                 )
 
                 st.rerun()
@@ -808,7 +1059,7 @@ try:
 except Exception as error:
     show_error(
         "골라둔 혈당 기록을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
@@ -816,7 +1067,7 @@ pinned_rows.sort(
     key=lambda row: (
         row["measure_date"],
         row["measure_time"],
-        str(row["record_id"])
+        str(row["record_id"]),
     )
 )
 
@@ -826,7 +1077,7 @@ if pinned_rows:
     st.dataframe(
         blood_table(pinned_rows),
         hide_index=True,
-        use_container_width=True
+        use_container_width=True,
     )
 
 else:
@@ -870,12 +1121,12 @@ if pinned_ids:
         key=(
             f"visit_remove_pins_{scope}_{selected_id}_"
             f"{fingerprint(pinned_ids)}"
-        )
+        ),
     )
 
     if st.button(
         "선택 목록에서 빼기",
-        key=f"visit_remove_button_{scope}_{selected_id}"
+        key=f"visit_remove_button_{scope}_{selected_id}",
     ):
         if not to_remove:
             st.warning(
@@ -891,23 +1142,25 @@ if pinned_ids:
                     selected_id,
                     {
                         "pinned_record_ids": [
-                            item for item in pinned_ids
+                            item
+                            for item in pinned_ids
                             if item not in to_remove
-                        ]
-                    }
+                        ],
+                    },
                 )
 
             except Exception as error:
                 show_error(
                     "선택 목록을 변경하지 못했어요.",
-                    error
+                    error,
                 )
 
             else:
                 st.session_state.visit_notice = (
                     user.id,
                     profile_id,
-                    "노트의 선택 목록에서 뺐어요. 원래 혈당 기록은 유지돼요."
+                    "노트의 선택 목록에서 뺐어요. "
+                    "원래 혈당 기록은 유지돼요.",
                 )
 
                 st.rerun()
@@ -926,7 +1179,10 @@ export_now = get_local_now()
 
 lines = [
     "당당케어 진료 노트",
-    f"자료 생성 시각: {export_now:%Y-%m-%d %H:%M} ({timezone_name})",
+    (
+        f"자료 생성 시각: {export_now:%Y-%m-%d %H:%M} "
+        f"({timezone_name})"
+    ),
     "측정 기록의 날짜·시간은 저장된 값을 그대로 표시함",
     "",
     f"대상: {profile['name']} · {kind}",
@@ -948,7 +1204,7 @@ lines = [
     note.get("followup_notes") or "미입력",
     "",
     "[혈당 기록 요약]",
-    f"조회한 혈당 기록: {len(glucose_rows)}건"
+    f"조회한 혈당 기록: {len(glucose_rows)}건",
 ]
 
 if not summary.empty:
@@ -964,7 +1220,7 @@ if not summary.empty:
 
 lines.extend([
     "",
-    "[식사·활동 기록 현황]"
+    "[식사·활동 기록 현황]",
 ])
 
 for code, label in kind_labels.items():
@@ -980,7 +1236,7 @@ for code, label in kind_labels.items():
 lines.extend([
     "",
     "[진료 때 확인할 혈당 기록]",
-    "선택한 기록은 요약 기간 밖의 기록도 포함할 수 있음"
+    "선택한 기록은 요약 기간 밖의 기록도 포함할 수 있음",
 ])
 
 for row in pinned_rows:
@@ -1008,7 +1264,7 @@ lines.extend([
     "",
     "이 파일은 사용자가 입력한 기록을 바탕으로 만든 진료 전·후 기록 자료입니다.",
     "식사 기록 건수는 식사 횟수가 아닌 음식 항목 수입니다.",
-    "기록이 없다는 것은 식사나 활동이 없었다는 뜻이 아닙니다."
+    "기록이 없다는 것은 식사나 활동이 없었다는 뜻이 아닙니다.",
 ])
 
 report = "\n".join(lines)
@@ -1018,5 +1274,5 @@ st.download_button(
     data=report.encode("utf-8-sig"),
     file_name=f"visit_note_{selected_id[:8]}.txt",
     mime="text/plain",
-    key=f"visit_download_{scope}_{selected_id}"
+    key=f"visit_download_{scope}_{selected_id}",
 )
