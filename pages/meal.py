@@ -18,16 +18,18 @@ UNITS = [
 ]
 
 RESET_OPTIONS = {
-    "냉장고 재료만 초기화": "ingredients",
-    "식사 조건만 초기화": "conditions",
-    "냉장고 재료·식사 조건 모두 초기화": "all"
+    "공유 냉장고 재료만 초기화": "ingredients",
+    "현재 대상의 식사 조건만 초기화": "conditions",
+    "공유 냉장고·현재 대상의 식사 조건 초기화": "all",
 }
 
 
 def fingerprint(value):
     return sha256(
         json.dumps(
-            value, sort_keys=True, default=str
+            value,
+            sort_keys=True,
+            default=str
         ).encode()
     ).hexdigest()[:16]
 
@@ -45,12 +47,9 @@ def clean_ingredients(rows):
     seen = set()
 
     for index, row in enumerate(rows, start=1):
-        raw_name = row.get("재료명")
-        name = (
-            ""
-            if raw_name is None
-            else str(raw_name).strip()
-        )
+        name = str(
+            row.get("재료명") or ""
+        ).strip()
 
         raw_amount = row.get("보유량")
         amount = (
@@ -59,12 +58,9 @@ def clean_ingredients(rows):
             else float(raw_amount)
         )
 
-        raw_unit = row.get("단위")
-        unit = (
-            ""
-            if raw_unit is None
-            else str(raw_unit).strip()
-        )
+        unit = str(
+            row.get("단위") or ""
+        ).strip()
 
         if not name and amount is None:
             continue
@@ -83,7 +79,7 @@ def clean_ingredients(rows):
                 "0보다 큰 숫자로 입력해 주세요."
             )
 
-        if amount is not None and not unit:
+        if amount is not None and unit not in UNITS:
             raise ValueError(
                 f"{index}행의 단위를 선택해 주세요."
             )
@@ -105,29 +101,103 @@ def clean_ingredients(rows):
     return result
 
 
-def build_reset_values(reset_type):
-    values = {}
+def read_fridge(client, user_id):
+    rows = (
+        client.table("family_fridges")
+        .select("ingredients")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+        .data
+    ) or []
 
-    if reset_type in ["ingredients", "all"]:
-        values["ingredients"] = []
+    return rows[0] if rows else None
 
-    if reset_type in ["conditions", "all"]:
-        values.update({
-            "allergies": "",
-            "excluded_foods": "",
-            "dietary_guidance": "",
-            "servings": 1,
-            "max_cooking_minutes": 30
-        })
 
-    if not values:
-        raise ValueError("초기화할 항목을 선택해 주세요.")
+def collect_legacy_ingredients(client, user_id):
+    # 기존 대상별 재료는 복사만 하고 원본은 삭제하지 않아요.
+    merged = {}
+    conflicts = set()
+    offset = 0
 
-    values["updated_at"] = datetime.now(
-        ZoneInfo("Asia/Seoul")
-    ).isoformat()
+    while True:
+        rows = (
+            client.table("meal_settings")
+            .select("profile_id,ingredients")
+            .eq("user_id", user_id)
+            .order("profile_id")
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        ) or []
 
-    return values
+        for row in rows:
+            for item in row.get("ingredients") or []:
+                name = str(
+                    item.get("name") or ""
+                ).strip()
+
+                if not name:
+                    continue
+
+                key = name.casefold()
+
+                candidate = {
+                    "name": name,
+                    "amount": item.get("amount"),
+                    "unit": item.get("unit") or ""
+                }
+
+                if key not in merged:
+                    merged[key] = candidate
+
+                elif (
+                    merged[key]["amount"],
+                    merged[key]["unit"]
+                ) != (
+                    candidate["amount"],
+                    candidate["unit"]
+                ):
+                    # 동일한 재고를 여러 대상에 입력했을 수 있어
+                    # 수량을 임의로 더하지 않아요.
+                    merged[key]["amount"] = None
+                    merged[key]["unit"] = ""
+                    conflicts.add(merged[key]["name"])
+
+        if len(rows) < 1000:
+            break
+
+        offset += 1000
+
+    return list(merged.values()), sorted(conflicts)
+
+
+def save_conditions(
+    client,
+    user_id,
+    profile_id,
+    values,
+    has_settings
+):
+    payload = {
+        "user_id": user_id,
+        "profile_id": profile_id,
+        **values,
+        "updated_at": datetime.now(
+            ZoneInfo("Asia/Seoul")
+        ).isoformat(),
+    }
+
+    # 기존 대상별 재료 사본은 수정하지 않아요.
+    # 처음 만드는 대상별 설정에는 빈 목록을 넣어요.
+    if not has_settings:
+        payload["ingredients"] = []
+
+    client.table("meal_settings").upsert(
+        payload,
+        on_conflict="profile_id",
+        returning="minimal"
+    ).execute()
 
 
 st.set_page_config(
@@ -138,7 +208,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #FFF9F9; }
+.stApp {
+    background-color: #FFF9F9;
+}
 
 div.stButton > button {
     border-radius: 14px;
@@ -154,7 +226,7 @@ div[data-testid="stForm"] {
 """, unsafe_allow_html=True)
 
 
-# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
+# 현재 페이지 메뉴 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/meal.py")
 
 
@@ -182,21 +254,25 @@ except Exception as error:
 
 
 st.title("🍽️ 냉장고 식단 추천")
+
 st.caption(
-    "가지고 있는 재료와 식사 조건을 저장하고, "
-    "AI에게 아침·점심·저녁 메뉴를 추천받아요."
+    "냉장고 재료는 같은 계정의 가족이 공유하고, "
+    "식사 조건은 관리 대상별로 저장해요."
 )
+
 
 if not profiles:
     st.info(
         "먼저 혈당 기록하기 페이지에서 "
         "관리 대상을 등록해 주세요."
     )
+
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
+
     st.stop()
 
 
@@ -250,32 +326,20 @@ with profile_menu:
 
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
+
 scope = f"{user.id}_{profile_id}"
 
-
-# 사람 대상 식단 페이지
-if profile["profile_type"] != "사람":
-    st.info(
-        "냉장고 식단 추천은 현재 사람 대상 기능이에요. "
-        "왼쪽에서 사람 관리 대상을 선택해 주세요."
-    )
-    st.page_link(
-        "pages/lifestyle.py",
-        label="반려동물의 사료·간식 섭취 기록하기",
-        icon="📝"
-    )
-    st.stop()
+is_person = profile["profile_type"] == "사람"
 
 
-st.subheader(f"{profile['name']}의 냉장고와 식사 조건")
-
-
-# 기존 저장 내용 불러오기
+# 계정 공유 재료와 현재 대상의 식사 조건 불러오기
 try:
+    fridge = read_fridge(client, user.id)
+
     saved_rows = (
         client.table("meal_settings")
         .select(
-            "ingredients,allergies,excluded_foods,"
+            "allergies,excluded_foods,"
             "dietary_guidance,servings,"
             "max_cooking_minutes,updated_at"
         )
@@ -288,27 +352,127 @@ try:
 
 except Exception as error:
     show_error(
-        "저장된 식사 조건을 불러오지 못했어요.",
+        "공유 냉장고 또는 식사 조건을 불러오지 못했어요. "
+        "공유 냉장고 SQL 실행 여부도 확인해 주세요.",
         error
     )
     st.stop()
 
+
 settings = saved_rows[0] if saved_rows else {}
 
-notice = st.session_state.pop("meal_notice", None)
 
-if notice and notice[:2] == (user.id, profile_id):
-    st.success(notice[2])
+notice = st.session_state.pop(
+    f"meal_notice_{user.id}",
+    None
+)
+
+if notice:
+    st.success(notice)
 
 
-# 재료 입력 표 초기값
+# 처음 한 번 기존 대상별 재료를 공유 냉장고로 복사
+if fridge is None:
+    st.subheader("🧊 가족 공유 냉장고 시작하기")
+
+    st.write(
+        "처음 한 번, 이 계정의 모든 관리 대상에 저장된 "
+        "재료를 합쳐 공유 냉장고를 만들어요."
+    )
+
+    st.caption(
+        "같은 이름의 재료는 한 줄로 합쳐요. "
+        "보유량이나 단위가 서로 다르면 양을 비워 두므로 "
+        "직접 확인해 주세요. "
+        "기존 대상별 저장 자료는 삭제하지 않아요."
+    )
+
+    if st.button(
+        "🧊 기존 재료를 합쳐 공유 냉장고 만들기",
+        type="primary"
+    ):
+        try:
+            ingredients, conflicts = (
+                collect_legacy_ingredients(
+                    client,
+                    user.id
+                )
+            )
+
+            # 이미 만들어진 공유 냉장고를 덮어쓰지 않도록
+            # upsert 대신 insert를 사용해요.
+            client.table("family_fridges").insert({
+                "user_id": user.id,
+                "ingredients": ingredients,
+            }).execute()
+
+        except Exception as error:
+            show_error(
+                "공유 냉장고 생성 결과를 확인하지 못했어요. "
+                "페이지를 다시 열어 확인해 주세요.",
+                error
+            )
+
+        else:
+            st.session_state[
+                f"meal_notice_{user.id}"
+            ] = (
+                "기존 재료를 복사해 "
+                "가족 공유 냉장고를 만들었어요."
+            )
+
+            st.session_state[
+                f"meal_import_conflicts_{user.id}"
+            ] = conflicts
+
+            st.rerun()
+
+    st.stop()
+
+
+conflicts = st.session_state.get(
+    f"meal_import_conflicts_{user.id}",
+    []
+)
+
+if conflicts:
+    st.warning(
+        "기존 기록의 보유량·단위가 달라 "
+        "양을 비워 둔 재료: "
+        + ", ".join(conflicts)
+    )
+
+    st.caption(
+        "아래에서 실제 보유량을 확인한 뒤 "
+        "공유 냉장고를 저장해 주세요."
+    )
+
+
+saved_ingredients = fridge.get("ingredients") or []
+
+fridge_revision = fingerprint(fridge)
+
+revision = fingerprint({
+    "settings": settings,
+    "fridge": fridge
+})
+
+
+# 공유 냉장고 입력
+st.subheader("🧊 우리 가족 공유 냉장고")
+
+st.caption(
+    "어떤 관리 대상을 선택해도 같은 재료가 보여요. "
+    "여기서 저장하거나 비우면 이 계정 전체에 적용돼요."
+)
+
 ingredient_rows = [
     {
         "재료명": item.get("name") or "",
         "보유량": item.get("amount"),
         "단위": item.get("unit") or None
     }
-    for item in (settings.get("ingredients") or [])
+    for item in saved_ingredients
 ]
 
 if not ingredient_rows:
@@ -336,18 +500,14 @@ ingredient_df["단위"] = (
     ingredient_df["단위"].astype("string")
 )
 
-revision = fingerprint(settings)
-form_key = f"meal_settings_form_{scope}_{revision}"
 
-
-# 재료와 조건 입력
-with st.form(form_key):
-    st.markdown("### 🧊 냉장고에 있는 재료")
-
+with st.form(
+    f"family_fridge_form_{user.id}_{fridge_revision}"
+):
     st.caption(
         "표의 칸을 눌러 입력해요. "
-        "맨 아래 빈 행에서 재료를 추가하고, "
-        "왼쪽 행 선택란에서 행을 선택해 삭제할 수 있어요."
+        "맨 아래 빈 행에서 추가하고, "
+        "왼쪽 행 선택란을 눌러 삭제할 수 있어요."
     )
 
     edited_ingredients = st.data_editor(
@@ -373,7 +533,10 @@ with st.form(form_key):
                 default="g"
             )
         },
-        key=f"meal_editor_{scope}_{revision}"
+        key=(
+            f"family_fridge_editor_"
+            f"{user.id}_{fridge_revision}"
+        )
     )
 
     st.caption(
@@ -381,73 +544,13 @@ with st.form(form_key):
         "양을 입력할 때는 단위도 선택해 주세요."
     )
 
-    st.markdown("### ⚙️ 식사 조건")
-
-    allergies = st.text_area(
-        "알레르기",
-        value=settings.get("allergies") or "",
-        placeholder=(
-            "예: 우유, 땅콩. "
-            "확인된 알레르기가 없다면 ‘없음’이라고 입력해 주세요."
-        ),
-        max_chars=1000
-    )
-
-    st.caption(
-        "알레르기 항목은 보관용이며, "
-        "이번 AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
-    )
-
-    excluded_foods = st.text_area(
-        "제외하고 싶은 음식·재료",
-        value=settings.get("excluded_foods") or "",
-        placeholder="예: 버섯, 고수 — 음식·재료 이름만 입력",
-        max_chars=1000
-    )
-
-    dietary_guidance = st.text_area(
-        "의료진에게 받은 식사 지침(선택)",
-        value=settings.get("dietary_guidance") or "",
-        placeholder=(
-            "의료진에게 안내받은 내용이 있으면 입력해 주세요. "
-            "없으면 비워 두어도 돼요."
-        ),
-        max_chars=3000
-    )
-
-    st.caption(
-        "의료진 지침은 보관용이며, "
-        "이번 AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
-    )
-
-    c1, c2 = st.columns(2)
-
-    servings = c1.number_input(
-        "한 끼 기준 인분 수",
-        min_value=1,
-        max_value=20,
-        value=int(settings.get("servings", 1)),
-        step=1
-    )
-
-    cooking_minutes = c2.number_input(
-        "한 끼 최대 조리 시간(분)",
-        min_value=5,
-        max_value=240,
-        value=int(
-            settings.get("max_cooking_minutes", 30)
-        ),
-        step=5
-    )
-
-    save_clicked = st.form_submit_button(
-        "💾 재료·식사 조건 저장",
+    save_fridge_clicked = st.form_submit_button(
+        "💾 공유 냉장고 재료 저장",
         use_container_width=True
     )
 
 
-# 입력 검증과 저장
-if save_clicked:
+if save_fridge_clicked:
     try:
         clean_df = edited_ingredients.astype(object).where(
             pd.notna(edited_ingredients),
@@ -458,25 +561,20 @@ if save_clicked:
             clean_df.to_dict("records")
         )
 
-        payload = {
-            "profile_id": profile_id,
-            "user_id": user.id,
-            "ingredients": ingredients,
-            "allergies": allergies.strip(),
-            "excluded_foods": excluded_foods.strip(),
-            "dietary_guidance": dietary_guidance.strip(),
-            "servings": int(servings),
-            "max_cooking_minutes": int(cooking_minutes),
-            "updated_at": datetime.now(
-                ZoneInfo("Asia/Seoul")
-            ).isoformat()
-        }
+        result = (
+            client.table("family_fridges")
+            .update(
+                {"ingredients": ingredients},
+                returning="representation"
+            )
+            .eq("user_id", user.id)
+            .execute()
+        )
 
-        client.table("meal_settings").upsert(
-            payload,
-            on_conflict="profile_id",
-            returning="minimal"
-        ).execute()
+        if not result.data:
+            raise ValueError(
+                "저장된 공유 냉장고를 확인하지 못했어요."
+            )
 
     except ValueError as error:
         st.warning(str(error))
@@ -484,98 +582,237 @@ if save_clicked:
     except Exception as error:
         show_error(
             "저장 결과를 확인하지 못했어요. "
-            "페이지를 다시 열어 저장 내용을 확인해 주세요.",
+            "페이지를 다시 열어 확인해 주세요.",
             error
         )
 
     else:
-        st.session_state.meal_notice = (
-            user.id,
-            profile_id,
-            "재료와 식사 조건을 저장했어요."
+        st.session_state.pop(
+            f"meal_import_conflicts_{user.id}",
+            None
         )
+
+        st.session_state[
+            f"meal_notice_{user.id}"
+        ] = (
+            "공유 냉장고 재료를 저장했어요. "
+            "같은 계정의 모든 대상에게 적용돼요."
+        )
+
         st.rerun()
 
 
-# 저장 상태 확인
-st.divider()
-st.markdown("### 📋 현재 저장된 내용")
+# 현재 관리 대상의 식사 조건
+st.subheader(f"⚙️ {profile['name']}의 식사 조건")
 
-saved_ingredients = settings.get("ingredients") or []
+st.caption(
+    "아래 조건은 현재 선택한 대상에게만 저장돼요."
+)
 
-if not settings:
+if not is_person:
     st.info(
-        "아직 저장한 내용이 없어요. "
-        "위에서 입력한 뒤 저장 버튼을 눌러 주세요."
+        "반려동물도 공유 냉장고와 개별 식사 조건을 "
+        "저장할 수 있어요. "
+        "강아지 AI 추천은 다음 단계에서 연결해요."
     )
 
-else:
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "저장한 재료",
-        f"{len(saved_ingredients)}종류"
+    st.page_link(
+        "pages/lifestyle.py",
+        label="반려동물의 사료·간식 섭취 기록하기",
+        icon="📝"
     )
 
-    c2.metric(
-        "한 끼 인분 수",
-        f"{settings['servings']}인분"
+
+with st.form(
+    f"meal_conditions_{scope}_{fingerprint(settings)}"
+):
+    allergies = st.text_area(
+        "알레르기",
+        value=settings.get("allergies") or "",
+        placeholder=(
+            "확인된 알레르기를 입력해 주세요. "
+            "없다면 ‘없음’이라고 입력해 주세요."
+        ),
+        max_chars=1000
     )
 
-    c3.metric(
-        "한 끼 최대 조리 시간",
-        f"{settings['max_cooking_minutes']}분"
+    st.caption(
+        "알레르기는 현재 보관용이며 "
+        "AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
     )
 
-    if saved_ingredients:
-        summary = []
+    excluded_foods = st.text_area(
+        "제외하고 싶은 음식·재료",
+        value=settings.get("excluded_foods") or "",
+        placeholder="제외할 음식·재료 이름을 입력해 주세요.",
+        max_chars=1000
+    )
 
-        for item in saved_ingredients:
-            amount = item.get("amount")
+    guidance_label = (
+        "의료진에게 받은 식사 지침(선택)"
+        if is_person
+        else "수의사에게 받은 급여 지침(선택)"
+    )
 
-            summary.append({
-                "재료명": item["name"],
-                "보유량": (
-                    f"{float(amount):g} {item.get('unit') or ''}"
-                    if amount is not None
-                    else "미입력"
-                )
-            })
+    dietary_guidance = st.text_area(
+        guidance_label,
+        value=settings.get("dietary_guidance") or "",
+        placeholder="안내받은 내용이 있으면 입력해 주세요.",
+        max_chars=3000
+    )
 
-        st.dataframe(
-            pd.DataFrame(summary),
-            hide_index=True,
-            use_container_width=True
+    st.caption(
+        "이 지침은 현재 보관용이며 "
+        "AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
+    )
+
+    c1, c2 = st.columns(2)
+
+    servings = c1.number_input(
+        (
+            "한 끼 기준 인분 수"
+            if is_person
+            else "한 번 준비할 급여 분량 수"
+        ),
+        min_value=1,
+        max_value=20,
+        value=int(settings.get("servings") or 1),
+        step=1
+    )
+
+    if not is_person:
+        st.caption(
+            "분량 수는 준비 횟수를 뜻하며, "
+            "적정 급여량이나 영양 균형을 "
+            "계산하는 값은 아니에요."
+        )
+
+    cooking_minutes = c2.number_input(
+        "한 끼 최대 조리 시간(분)",
+        min_value=5,
+        max_value=240,
+        value=int(
+            settings.get("max_cooking_minutes") or 30
+        ),
+        step=5
+    )
+
+    save_conditions_clicked = st.form_submit_button(
+        "💾 현재 대상의 식사 조건 저장",
+        use_container_width=True
+    )
+
+
+if save_conditions_clicked:
+    try:
+        save_conditions(
+            client,
+            user.id,
+            profile_id,
+            {
+                "allergies": allergies.strip(),
+                "excluded_foods": excluded_foods.strip(),
+                "dietary_guidance": dietary_guidance.strip(),
+                "servings": int(servings),
+                "max_cooking_minutes": int(cooking_minutes)
+            },
+            bool(settings)
+        )
+
+    except Exception as error:
+        show_error(
+            "식사 조건 저장 결과를 확인하지 못했어요. "
+            "페이지를 다시 열어 확인해 주세요.",
+            error
         )
 
     else:
-        st.caption("저장된 재료가 없어요.")
+        st.session_state[
+            f"meal_notice_{user.id}"
+        ] = f"{profile['name']}의 식사 조건을 저장했어요."
 
-    with st.expander("저장한 식사 조건 보기"):
-        st.markdown("**알레르기**")
-        st.write(
-            settings.get("allergies") or "미입력"
-        )
+        st.rerun()
 
-        st.markdown("**제외할 음식·재료**")
-        st.write(
-            settings.get("excluded_foods") or "미입력"
-        )
 
-        st.markdown("**의료진에게 받은 식사 지침**")
-        st.write(
-            settings.get("dietary_guidance") or "미입력"
-        )
+# 현재 저장된 내용
+st.divider()
+st.markdown("### 📋 현재 저장된 내용")
 
-    st.caption(
-        "입력란을 수정해도 저장 버튼을 누르기 전에는 "
-        "위의 저장 내용이 바뀌지 않아요."
+c1, c2, c3 = st.columns(3)
+
+c1.metric(
+    "공유 냉장고 재료",
+    f"{len(saved_ingredients)}종류"
+)
+
+c2.metric(
+    "한 끼 인분 수" if is_person else "준비할 급여 분량 수",
+    settings.get("servings") or 1
+)
+
+c3.metric(
+    "최대 조리 시간",
+    f"{settings.get('max_cooking_minutes') or 30}분"
+)
+
+if saved_ingredients:
+    summary = []
+
+    for item in saved_ingredients:
+        amount = item.get("amount")
+
+        summary.append({
+            "재료명": item["name"],
+            "보유량": (
+                f"{float(amount):g} {item.get('unit') or ''}"
+                if amount is not None
+                else "미입력"
+            )
+        })
+
+    st.dataframe(
+        pd.DataFrame(summary),
+        hide_index=True,
+        use_container_width=True
+    )
+
+else:
+    st.caption("공유 냉장고에 저장된 재료가 없어요.")
+
+
+if not settings:
+    st.info(
+        f"{profile['name']}의 식사 조건은 "
+        "아직 저장하지 않았어요."
     )
 
 
-# 냉장고·식사 조건 선택 초기화
-with st.expander("🗑️ 냉장고·식사 조건 초기화"):
-    st.write(f"초기화할 관리 대상: **{profile['name']}**")
+with st.expander(
+    f"{profile['name']}의 저장한 식사 조건 보기"
+):
+    condition_fields = [
+        ("알레르기", "allergies"),
+        ("제외할 음식·재료", "excluded_foods"),
+        (guidance_label, "dietary_guidance")
+    ]
+
+    for label, field in condition_fields:
+        st.markdown(f"**{label}**")
+        st.write(settings.get(field) or "미입력")
+
+
+st.caption(
+    "입력란을 수정해도 해당 저장 버튼을 누르기 전에는 "
+    "저장 내용이 바뀌지 않아요."
+)
+
+
+# 공유 냉장고·현재 대상 조건 선택 초기화
+with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
+    st.write(
+        f"공유 냉장고: **이 계정 전체** / "
+        f"식사 조건: **{profile['name']}만**"
+    )
 
     reset_label = st.radio(
         "초기화할 항목 옆의 선택 칸을 눌러 주세요.",
@@ -586,69 +823,51 @@ with st.expander("🗑️ 냉장고·식사 조건 초기화"):
 
     reset_type = RESET_OPTIONS.get(reset_label)
 
-    if reset_type == "ingredients":
+    if reset_type in ["ingredients", "all"]:
         st.warning(
-            f"저장된 냉장고 재료 "
-            f"{len(saved_ingredients)}종류를 모두 비워요."
+            f"공유 냉장고 재료 {len(saved_ingredients)}종류를 "
+            "모두 비워요. 다른 가족과 반려동물이 보는 "
+            "재료도 함께 비워져요."
         )
 
-        st.caption(
-            "알레르기, 제외할 음식, 의료진 지침, "
-            "인분 수와 조리 시간은 유지돼요."
-        )
-
-    elif reset_type == "conditions":
+    if reset_type in ["conditions", "all"]:
         st.warning(
-            "알레르기, 제외할 음식·재료, "
-            "의료진에게 받은 식사 지침을 모두 비워요. "
-            "인분 수는 1인분, 최대 조리 시간은 30분으로 돌아가요."
+            f"{profile['name']}의 알레르기·제외 음식·"
+            "식사 지침을 비우고, 분량 수는 1, "
+            "조리 시간은 30분으로 되돌려요."
         )
 
-        st.caption("저장된 냉장고 재료는 유지돼요.")
-
-    elif reset_type == "all":
-        st.warning(
-            "냉장고 재료와 식사 조건을 모두 초기화해요. "
-            "알레르기, 제외할 음식·재료, 의료진 지침을 비우고, "
-            "인분 수는 1인분, 최대 조리 시간은 30분으로 돌아가요."
-        )
-
-    else:
-        st.info("위에서 초기화할 항목을 하나 선택해 주세요.")
+    if reset_type is None:
+        st.info("초기화할 항목을 먼저 선택해 주세요.")
 
     st.caption(
-        "초기화한 내용은 앱에서 복구할 수 없어요. "
-        "선택한 대상의 냉장고·식사 조건에만 적용되며, "
-        "혈당 기록과 식사·활동 기록은 유지돼요."
+        "다른 대상의 식사 조건과 혈당·식사·활동 기록은 "
+        "유지돼요. 초기화한 현재 자료는 앱에서 복구할 수 없어요. "
+        "이전 대상별 재료 사본은 자동으로 다시 가져오지 않아요."
     )
-
-    if not settings:
-        st.caption("아직 저장한 재료·식사 조건이 없어요.")
 
     reset_has_data = (
-        bool(saved_ingredients)
-        if reset_type == "ingredients"
-        else bool(settings)
+        (
+            reset_type in ["ingredients", "all"]
+            and bool(saved_ingredients)
+        )
+        or (
+            reset_type in ["conditions", "all"]
+            and bool(settings)
+        )
     )
 
-    if (
-        reset_type == "ingredients"
-        and settings
-        and not saved_ingredients
-    ):
-        st.caption("초기화할 냉장고 재료가 없어요.")
-
-    reset_form_key = (
+    with st.form(
         f"meal_reset_form_{scope}_{revision}_{reset_type}"
-    )
-
-    with st.form(reset_form_key):
+    ):
         confirm_reset = st.checkbox(
+            "공유 냉장고는 계정 전체에 적용되며, "
             "선택한 항목이 초기화되는 것을 확인했어요."
         )
 
         reset_name = st.text_input(
-            "확인을 위해 현재 관리 대상 이름을 그대로 입력해 주세요.",
+            "확인을 위해 현재 관리 대상 이름을 "
+            "그대로 입력해 주세요.",
             help=f"입력할 이름: {profile['name']}"
         )
 
@@ -662,70 +881,116 @@ with st.expander("🗑️ 냉장고·식사 조건 초기화"):
         )
 
     if reset_clicked:
-        if reset_type is None:
-            st.warning("초기화할 항목을 먼저 선택해 주세요.")
-
-        elif not confirm_reset:
-            st.warning("초기화 확인란을 먼저 체크해 주세요.")
+        if not confirm_reset:
+            st.warning(
+                "초기화 확인란을 먼저 체크해 주세요."
+            )
 
         elif reset_name.strip() != profile["name"]:
-            st.warning("현재 관리 대상 이름을 정확히 입력해 주세요.")
+            st.warning(
+                "현재 관리 대상 이름을 정확히 입력해 주세요."
+            )
 
         else:
+            completed = []
+
             try:
-                reset_values = build_reset_values(reset_type)
-
-                result = (
-                    client.table("meal_settings")
-                    .update(
-                        reset_values,
-                        returning="representation"
+                if reset_type in ["ingredients", "all"]:
+                    result = (
+                        client.table("family_fridges")
+                        .update(
+                            {"ingredients": []},
+                            returning="representation"
+                        )
+                        .eq("user_id", user.id)
+                        .execute()
                     )
-                    .eq("user_id", user.id)
-                    .eq("profile_id", profile_id)
-                    .execute()
-                )
 
-                if not result.data:
-                    raise ValueError(
-                        "초기화된 설정이 없어요. "
-                        "페이지를 다시 열어 확인해 주세요."
+                    if not result.data:
+                        raise ValueError(
+                            "공유 냉장고 초기화 결과를 "
+                            "확인하지 못했어요."
+                        )
+
+                    completed.append(
+                        "계정 전체의 공유 냉장고 재료"
+                    )
+
+                    st.session_state.pop(
+                        f"meal_import_conflicts_{user.id}",
+                        None
+                    )
+
+                if (
+                    reset_type in ["conditions", "all"]
+                    and settings
+                ):
+                    save_conditions(
+                        client,
+                        user.id,
+                        profile_id,
+                        {
+                            "allergies": "",
+                            "excluded_foods": "",
+                            "dietary_guidance": "",
+                            "servings": 1,
+                            "max_cooking_minutes": 30
+                        },
+                        True
+                    )
+
+                    completed.append(
+                        f"{profile['name']}의 식사 조건"
                     )
 
             except Exception as error:
+                if completed:
+                    st.warning(
+                        "이미 초기화된 항목: "
+                        + ", ".join(completed)
+                    )
+
                 show_error(
-                    "초기화 결과를 확인하지 못했어요. "
-                    "페이지를 다시 열어 저장 내용을 확인해 주세요.",
+                    "일부 요청의 처리 결과를 확인하지 못했어요. "
+                    "페이지를 다시 열어 각 저장 내용을 "
+                    "확인해 주세요.",
                     error
                 )
 
-            else:
-                result_messages = {
-                    "ingredients": (
-                        f"{profile['name']}의 냉장고 재료를 "
-                        "초기화했어요."
-                    ),
-                    "conditions": (
-                        f"{profile['name']}의 식사 조건을 "
-                        "초기화했어요."
-                    ),
-                    "all": (
-                        f"{profile['name']}의 냉장고 재료와 "
-                        "식사 조건을 모두 초기화했어요."
-                    )
-                }
+                # 초기화 전 자료가 아래 AI 화면에
+                # 전달되지 않게 해요.
+                st.stop()
 
-                st.session_state.meal_notice = (
-                    user.id,
-                    profile_id,
-                    result_messages[reset_type]
+            else:
+                st.session_state[
+                    f"meal_notice_{user.id}"
+                ] = (
+                    ", ".join(completed)
+                    + "을 초기화했어요."
                 )
+
                 st.rerun()
 
 
-# Gemini 식단 추천 화면 연결
-show_meal_recommendations(
-    user_id=user.id,
-    profile_id=profile_id,
-    settings=settings
-)
+# 사람 AI 추천에는 공유 냉장고 재료를 전달
+# 반려동물에게 사람용 AI 추천이 실행되지 않도록 구분
+if is_person:
+    recommendation_settings = {
+        **settings,
+        "ingredients": saved_ingredients
+    }
+
+    show_meal_recommendations(
+        user_id=user.id,
+        profile_id=profile_id,
+        settings=recommendation_settings
+    )
+
+else:
+    st.divider()
+    st.markdown("### 🤖 반려동물 식단 추천")
+
+    st.info(
+        "공유 냉장고와 조건 저장은 사용할 수 있어요. "
+        "강아지용 AI 추천은 meal_ai.py를 수정한 뒤 연결돼요."
+    )
