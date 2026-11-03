@@ -1,13 +1,16 @@
 from datetime import date, datetime
 from hashlib import sha256
-from zoneinfo import ZoneInfo
 import json
 import math
 
 import pandas as pd
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_local_now
+)
 from meal_ai import show_meal_recommendations
 from sidebar_menu import show_sidebar_menu
 
@@ -286,9 +289,7 @@ def save_conditions(
         "user_id": user_id,
         "profile_id": profile_id,
         **values,
-        "updated_at": datetime.now(
-            ZoneInfo("Asia/Seoul")
-        ).isoformat(),
+        "updated_at": get_local_now().isoformat(),
     }
 
     if not has_settings:
@@ -330,6 +331,7 @@ div[data-testid="stForm"] {
 profile_menu = show_sidebar_menu("pages/meal.py")
 
 client, user = require_login()
+timezone_name = get_timezone_name()
 
 
 # 관리 대상 불러오기
@@ -358,12 +360,10 @@ st.caption(
     "식사 조건은 관리 대상별로 저장해요."
 )
 
-today = datetime.now(
-    ZoneInfo("Asia/Seoul")
-).date()
+today = get_local_now().date()
 
 st.caption(
-    f"기한 판단 기준: 대한민국 날짜 {today:%Y-%m-%d}. "
+    f"기한 판단 기준: {timezone_name} 날짜 {today:%Y-%m-%d}. "
     "화면을 다시 불러올 때 갱신돼요."
 )
 
@@ -988,7 +988,7 @@ with st.expander(
 
         with st.form(
             f"expired_delete_"
-            f"{user.id}_{fridge_revision}_{today}"
+            f"{user.id}_{fridge_revision}_{today}_{timezone_name}"
         ):
             selected_expired = st.multiselect(
                 "삭제할 재료 선택",
@@ -1031,9 +1031,7 @@ with st.expander(
                             "다시 선택해 주세요."
                         )
 
-                    delete_day = datetime.now(
-                        ZoneInfo("Asia/Seoul")
-                    ).date()
+                    delete_day = get_local_now().date()
 
                     selected_set = set(
                         selected_expired
@@ -1268,9 +1266,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
 
 
 # 기한이 지난 재료와 잘못된 날짜의 재료는 AI에서 제외
-ai_today = datetime.now(
-    ZoneInfo("Asia/Seoul")
-).date()
+ai_today = get_local_now().date()
 
 ai_ingredients = []
 excluded_by_date = []
