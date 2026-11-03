@@ -1,10 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_user_timezone,
+    get_local_now
+)
 from record_links import show_record_links
 from sidebar_menu import show_sidebar_menu
 
@@ -50,10 +54,14 @@ div[data-testid="stForm"] {
 profile_menu = show_sidebar_menu("pages/record.py")
 
 
-# 로그인 확인
+# 로그인 확인과 계정 시간대
 client, user = require_login()
 
+user_timezone = get_user_timezone()
+timezone_name = get_timezone_name()
+
 st.title("🩸 혈당 기록하기")
+
 st.caption(
     "왼쪽에서 관리 대상을 선택해 혈당을 기록해요. "
     "이전 기록은 ‘기록 확인·수정’에서 확인할 수 있어요."
@@ -125,7 +133,10 @@ with st.expander(
         if not name.strip():
             st.warning("이름 또는 별명을 입력해 주세요.")
 
-        elif animal_choice == "기타" and not custom_animal.strip():
+        elif (
+            animal_choice == "기타"
+            and not custom_animal.strip()
+        ):
             st.warning("동물 종류를 직접 입력해 주세요.")
 
         else:
@@ -166,6 +177,7 @@ with st.expander(
 
 if not profiles:
     profile_menu.caption("등록된 관리 대상이 없어요.")
+
     st.info(
         "먼저 위에서 관리 대상을 등록해 주세요. "
         "사람과 반려동물을 함께 등록할 수 있어요."
@@ -226,11 +238,17 @@ profile = profile_map[selected_id]
 
 st.subheader(f"{profile['name']}의 혈당 관리")
 
-now = datetime.now(ZoneInfo("Asia/Seoul"))
+now = get_local_now()
+
+st.caption(
+    f"날짜·시간 기준: {timezone_name} · "
+    f"현재 시각 {now:%Y-%m-%d %H:%M}"
+)
 
 
 # 저장 완료 안내와 입력 양식 초기화 번호
 scope = f"{user.id}_{selected_id}"
+
 notice_key = f"glucose_notice_{scope}"
 revision_key = f"glucose_revision_{scope}"
 revision = st.session_state.get(revision_key, 0)
@@ -241,7 +259,11 @@ if notice:
     st.success(notice)
 
 profile_notice_key = f"profile_edit_notice_{scope}"
-profile_notice = st.session_state.pop(profile_notice_key, None)
+
+profile_notice = st.session_state.pop(
+    profile_notice_key,
+    None
+)
 
 if profile_notice:
     st.success(profile_notice)
@@ -441,7 +463,10 @@ if profile["profile_type"] == "반려동물":
 
 
 # 혈당 입력
-form_key = f"glucose_{scope}_{revision}"
+# 시간대가 바뀌면 이전 시간대의 입력값을 재사용하지 않아요.
+form_key = (
+    f"glucose_{scope}_{revision}_{timezone_name}"
+)
 
 with st.form(form_key):
     c1, c2 = st.columns(2)
@@ -455,13 +480,16 @@ with st.form(form_key):
 
     measure_time = c2.time_input(
         "🕐 측정 시간",
-        value=now.time().replace(second=0, microsecond=0),
+        value=now.time().replace(
+            second=0,
+            microsecond=0
+        ),
         step=60,
         key=f"{form_key}_time"
     )
 
     st.caption(
-        "시간은 대한민국 기준이며, "
+        f"날짜와 시간은 선택한 시간대({timezone_name}) 기준이며, "
         "오후 1시는 13:00으로 저장돼요. "
         "현재보다 미래인 측정 시각은 저장할 수 없어요."
     )
@@ -506,11 +534,32 @@ if saved:
     measured_at = datetime.combine(
         measure_date,
         measure_time
-    ).replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    ).replace(tzinfo=user_timezone)
 
-    current_time = datetime.now(ZoneInfo("Asia/Seoul"))
+    current_time = get_local_now()
 
-    if measured_at > current_time:
+    # 시계 전환으로 존재하지 않는 현지 시각인지 확인해요.
+    round_trip = (
+        measured_at.astimezone(timezone.utc)
+        .astimezone(user_timezone)
+        .replace(tzinfo=None)
+    )
+
+    entered_time = datetime.combine(
+        measure_date,
+        measure_time
+    )
+
+    if round_trip != entered_time:
+        st.warning(
+            "선택한 시간대의 시계 전환으로 존재하지 않는 시각이에요. "
+            "실제로 측정한 날짜와 시간을 다시 확인해 주세요."
+        )
+
+    elif (
+        measured_at.astimezone(timezone.utc)
+        > current_time.astimezone(timezone.utc)
+    ):
         st.warning(
             "측정 시각이 현재보다 미래예요. "
             "실제로 측정한 날짜와 시간으로 바꿔 주세요."
@@ -540,20 +589,31 @@ if saved:
             ).execute()
 
         except Exception as error:
-            show_error("기록을 저장하지 못했어요.", error)
+            show_error(
+                "기록을 저장하지 못했어요.",
+                error
+            )
 
         else:
             st.session_state[notice_key] = (
                 f"{profile['name']}의 혈당 "
                 f"{glucose} mg/dL 기록을 저장했어요!"
             )
-            st.session_state[revision_key] = revision + 1
+
+            st.session_state[revision_key] = (
+                revision + 1
+            )
+
             st.rerun()
 
 
 # 선택한 대상의 최근 혈당 기록
 st.divider()
-st.subheader(f"📋 {profile['name']}의 최근 혈당 기록")
+
+st.subheader(
+    f"📋 {profile['name']}의 최근 혈당 기록"
+)
+
 st.caption(
     "측정 날짜·시간이 최신인 순서로 최대 3건을 표시해요."
 )
