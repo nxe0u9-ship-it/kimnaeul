@@ -612,8 +612,8 @@ st.caption(
 if not is_person:
     st.info(
         "반려동물도 공유 냉장고와 개별 식사 조건을 "
-        "저장할 수 있어요. "
-        "강아지 AI 추천은 다음 단계에서 연결해요."
+        "저장할 수 있어요. 강아지를 선택하면 아래에서 "
+        "토핑·간식 후보를 추천받을 수 있어요."
     )
 
     st.page_link(
@@ -972,25 +972,17 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
                 st.rerun()
 
 
-# 사람 AI 추천에는 공유 냉장고 재료를 전달
-# 반려동물에게 사람용 AI 추천이 실행되지 않도록 구분
-if is_person:
-    recommendation_settings = {
-        **settings,
-        "ingredients": saved_ingredients
-    }
+# 공유 냉장고 재료와 현재 대상의 조건을 AI 화면에 전달
+recommendation_settings = {
+    **settings,
+    "ingredients": saved_ingredients
+}
 
-    show_meal_recommendations(
-        user_id=user.id,
-        profile_id=profile_id,
-        settings=recommendation_settings
-    )
-
-else:
-    st.divider()
-    st.markdown("### 🤖 반려동물 식단 추천")
-
-    st.info(
-        "공유 냉장고와 조건 저장은 사용할 수 있어요. "
-        "강아지용 AI 추천은 meal_ai.py를 수정한 뒤 연결돼요."
-    )
+# profile은 사람·강아지 구분에 사용해요.
+# 이름과 계정 ID는 meal_ai.py에서 API 요청에 포함하지 않아요.
+show_meal_recommendations(
+    user_id=user.id,
+    profile_id=profile_id,
+    settings=recommendation_settings,
+    profile=profile
+)
