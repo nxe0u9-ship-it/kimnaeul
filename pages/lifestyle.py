@@ -495,7 +495,6 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             )
 
     else:
-        # 수정 전 기록을 담은 미리보기·분석 결과 초기화
         st.session_state.pop(
             f"care_record_context_{scope}",
             None
@@ -538,7 +537,6 @@ div[data-testid="stForm"] {
 """, unsafe_allow_html=True)
 
 
-# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/lifestyle.py")
 
 
@@ -656,8 +654,13 @@ selected_type = st.radio(
 record_type = TYPES[selected_type]
 is_pet = profile["profile_type"] == "반려동물"
 
+# 저장 성공 후 기타 활동 입력란과 기록 양식을 함께 초기화
+revision_key = f"lifestyle_form_revision_{scope}"
+revision = st.session_state.get(revision_key, 0)
+
 food_count = 1
 activity_name = None
+custom_activity = ""
 
 if record_type == "meal":
     st.caption(
@@ -690,6 +693,19 @@ elif record_type == "activity":
         key=f"activity_kind_{scope}"
     )
 
+    if activity_name == "기타":
+        custom_activity = st.text_input(
+            "기타 활동 입력",
+            placeholder="예: 계단 오르기, 배드민턴, 공놀이",
+            max_chars=100,
+            key=f"custom_activity_{scope}_{revision}"
+        )
+
+        st.caption(
+            "실제로 한 활동을 입력해 주세요. "
+            "입력한 이름으로 저장돼요."
+        )
+
     st.caption(
         "시작 시각과 지속 시간을 입력해요. "
         "자정을 넘긴 활동은 날짜별로 나눠 기록해 주세요."
@@ -707,10 +723,6 @@ else:
         "하루가 끝난 어제 이전 날짜만 선택할 수 있어요."
     )
 
-
-# 저장 성공 후 입력 양식을 새로 만드는 번호
-revision_key = f"lifestyle_form_revision_{scope}"
-revision = st.session_state.get(revision_key, 0)
 
 form_key = (
     f"lifestyle_form_{scope}_{record_type}_{revision}"
@@ -758,7 +770,6 @@ with st.form(form_key):
     meal_slot = None
     duration = None
     intensity = None
-    custom_activity = ""
     wake_date = None
     wake_time = None
     confirmed = False
@@ -802,9 +813,6 @@ with st.form(form_key):
         )
 
     elif record_type == "activity":
-        if activity_name == "기타":
-            custom_activity = st.text_input("활동명")
-
         duration = st.number_input(
             "활동 시간(분)",
             min_value=1,
@@ -906,7 +914,9 @@ if submitted:
             )
 
             if not name:
-                raise ValueError("활동명을 입력해 주세요.")
+                raise ValueError(
+                    "‘기타 활동 입력’ 칸에 실제 활동명을 입력해 주세요."
+                )
 
             ended = started + timedelta(
                 minutes=int(duration)
