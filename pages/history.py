@@ -251,14 +251,28 @@ def show_graph(rows, scope, selectable):
         )
         labels.append(f"{value:g}" if visible else "")
 
-    unique_times = (
-        chart["measured_at"].drop_duplicates().tolist()
+    # 날짜마다 첫 측정 시각에 날짜 눈금을 한 번만 표시해요.
+    # 각 점은 원래 측정 날짜와 시간 위치를 유지해요.
+    daily_ticks = (
+        chart.groupby(
+            chart["measured_at"].dt.normalize(),
+            sort=True
+        )["measured_at"]
+        .first()
+        .tolist()
     )
-    tick_step = max(1, (len(unique_times) + 7) // 8)
-    ticks = unique_times[::tick_step]
 
-    if ticks[-1] != unique_times[-1]:
-        ticks.append(unique_times[-1])
+    tick_step = max(1, (len(daily_ticks) + 7) // 8)
+    ticks = daily_ticks[::tick_step]
+
+    if ticks[-1] != daily_ticks[-1]:
+        ticks.append(daily_ticks[-1])
+
+    tick_date_format = (
+        "%Y/%m/%d"
+        if daily_ticks[0].year != daily_ticks[-1].year
+        else "%m/%d"
+    )
 
     graph_key = (
         f"history_graph_{scope}_{selectable}_"
@@ -330,7 +344,8 @@ def show_graph(rows, scope, selectable):
                 for row in chart.to_dict("records")
             ],
             hovertemplate=(
-                "%{x|%Y-%m-%d %H:%M}<br>"
+                "측정 날짜 %{x|%Y-%m-%d}<br>"
+                "측정 시간 %{x|%H:%M}<br>"
                 "혈당 %{y} mg/dL<br>"
                 "%{hovertext}<extra></extra>"
             ),
@@ -348,12 +363,12 @@ def show_graph(rows, scope, selectable):
         height=440,
         margin={"l": 35, "r": 35, "t": 45, "b": 85},
         xaxis={
-            "title": "측정 날짜 · 시간",
+            "title": "측정 날짜",
             "type": "date",
             "tickmode": "array",
             "tickvals": ticks,
             "ticktext": [
-                item.strftime("%m/%d<br>%H:%M")
+                item.strftime(tick_date_format)
                 for item in ticks
             ],
             "showgrid": False
@@ -369,6 +384,11 @@ def show_graph(rows, scope, selectable):
         dragmode="pan",
         showlegend=False,
         uirevision=f"history_{scope}_{fingerprint(rows)}"
+    )
+
+    st.caption(
+        "날짜는 하루에 한 번만 표시하고, 날짜가 많으면 일부만 표시해요. "
+        "각 점의 측정 시간은 점에 마우스를 올리면 확인할 수 있어요."
     )
 
     if label_mode == "숨기기":
