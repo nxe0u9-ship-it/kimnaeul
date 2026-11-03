@@ -93,7 +93,7 @@ def blood_table(rows):
 
 
 st.set_page_config(
-    page_title="진료 준비 노트 | 당당케어",
+    page_title="진료 노트 | 당당케어",
     page_icon="🏥",
     layout="wide"
 )
@@ -116,16 +116,14 @@ div[data-testid="stForm"] {
 """, unsafe_allow_html=True)
 
 
-# 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/visit.py")
-
 
 client, user = require_login()
 
-st.title("🏥 진료 준비 노트")
+st.title("🏥 진료 노트")
 st.caption(
-    "진료 때 물어볼 질문을 저장하고, "
-    "관련 기록을 모아 준비해요."
+    "진료 전 질문과 관련 기록을 준비하고, "
+    "진료 후 들은 설명과 다음 확인 사항을 함께 기록해요."
 )
 
 
@@ -173,10 +171,12 @@ with profile_menu:
             if item["profile_type"] == "사람"
             else "🐾"
         )
+
         kind = (
             item.get("animal_type")
             or item["profile_type"]
         )
+
         label = f"{icon} {item['name']} · {kind}"
 
         if sum(
@@ -205,7 +205,7 @@ profile = profile_map[profile_id]
 scope = f"{user.id}_{profile_id}"
 today = datetime.now(ZoneInfo("Asia/Seoul")).date()
 
-st.subheader(f"{profile['name']}의 진료 준비")
+st.subheader(f"{profile['name']}의 진료 노트")
 
 notice = st.session_state.pop("visit_notice", None)
 
@@ -260,7 +260,7 @@ def note_label(note_id):
 
     item = note_map[note_id]
     status = "완료" if item["completed"] else "준비 중"
-    visit_day = item.get("visit_date") or "예정일 미입력"
+    visit_day = item.get("visit_date") or "진료일 미입력"
 
     return (
         f"{item['title']} · {visit_day} · "
@@ -287,21 +287,24 @@ with st.form(
 ):
     title = st.text_input(
         "노트 제목",
-        value=note["title"] if existing else "진료 준비",
+        value=note["title"] if existing else "진료 노트",
         max_chars=100
     )
 
     visit_date = st.date_input(
-        "진료 예정일(선택)",
+        "진료일·예정일(선택)",
         value=(
             date.fromisoformat(note["visit_date"])
             if existing and note.get("visit_date")
             else None
         ),
-        help="예약 전이라면 비워 두어도 돼요."
+        help=(
+            "진료 전에는 예정일을, "
+            "진료 후에는 실제 진료일을 입력해 주세요."
+        )
     )
 
-    st.markdown("**진료 때 살펴볼 기록의 기간**")
+    st.markdown("**이 진료와 관련된 기록의 기간**")
 
     c1, c2 = st.columns(2)
 
@@ -325,6 +328,8 @@ with st.form(
         max_value=today
     )
 
+    st.markdown("### 📋 진료 전 준비")
+
     questions = st.text_area(
         "진료 때 물어볼 질문",
         value=note.get("questions", "") if existing else "",
@@ -341,6 +346,42 @@ with st.form(
         value=note.get("memo", "") if existing else "",
         placeholder="관찰한 변화나 전달할 내용을 입력해 주세요.",
         height=120,
+        max_chars=10000
+    )
+
+    st.markdown("### 📝 진료 후 기록")
+    st.caption(
+        "진료 전에는 비워 두었다가, "
+        "진료를 마친 후 같은 노트에 추가할 수 있어요."
+    )
+
+    consultation_notes = st.text_area(
+        "진료에서 들은 설명·안내",
+        value=(
+            (note.get("consultation_notes") or "")
+            if existing
+            else ""
+        ),
+        placeholder=(
+            "의료진·수의사에게 들은 설명, 검사 결과 안내, "
+            "질문에 대한 답변 등을 기록해 주세요."
+        ),
+        height=180,
+        max_chars=10000
+    )
+
+    followup_notes = st.text_area(
+        "다음 진료까지 확인할 내용",
+        value=(
+            (note.get("followup_notes") or "")
+            if existing
+            else ""
+        ),
+        placeholder=(
+            "안내받은 관리 방법, 관찰할 변화, "
+            "다음 진료 때 확인할 질문 등을 기록해 주세요."
+        ),
+        height=140,
         max_chars=10000
     )
 
@@ -377,6 +418,8 @@ if save:
             "summary_end": summary_end.isoformat(),
             "questions": questions.strip(),
             "memo": memo.strip(),
+            "consultation_notes": consultation_notes.strip(),
+            "followup_notes": followup_notes.strip(),
             "completed": completed
         }
 
@@ -434,7 +477,7 @@ with st.expander("🗑️ 이 진료 노트 삭제"):
         f"visit_delete_{scope}_{selected_id}_{form_version}"
     ):
         st.warning(
-            "이 노트의 질문·메모·선택 목록을 삭제해요. "
+            "이 노트의 질문·메모·진료 후 기록·선택 목록을 삭제해요. "
             "원래 혈당과 식사·활동 기록은 유지돼요."
         )
 
@@ -785,16 +828,16 @@ if pinned_ids:
 
 # 텍스트 다운로드
 st.divider()
-st.subheader("📥 진료 준비 내용 다운로드")
+st.subheader("📥 진료 노트 다운로드")
 
 kind = profile.get("animal_type") or profile["profile_type"]
 
 lines = [
-    "당당케어 진료 준비 노트",
+    "당당케어 진료 노트",
     "",
     f"대상: {profile['name']} · {kind}",
     f"제목: {note['title']}",
-    f"진료 예정일: {note.get('visit_date') or '미입력'}",
+    f"진료일·예정일: {note.get('visit_date') or '미입력'}",
     f"상태: {'완료' if note['completed'] else '준비 중'}",
     f"요약 기간: {note['summary_start']} ~ {note['summary_end']}",
     "",
@@ -803,6 +846,12 @@ lines = [
     "",
     "[전달할 내용]",
     note.get("memo") or "미입력",
+    "",
+    "[진료에서 들은 설명·안내]",
+    note.get("consultation_notes") or "미입력",
+    "",
+    "[다음 진료까지 확인할 내용]",
+    note.get("followup_notes") or "미입력",
     "",
     "[혈당 기록 요약]",
     f"조회한 혈당 기록: {len(glucose_rows)}건"
@@ -858,7 +907,7 @@ if len(pinned_rows) < len(pinned_ids):
 
 lines.extend([
     "",
-    "이 파일은 사용자가 입력한 기록을 바탕으로 만든 진료 준비 자료입니다.",
+    "이 파일은 사용자가 입력한 기록을 바탕으로 만든 진료 전·후 기록 자료입니다.",
     "식사 기록 건수는 식사 횟수가 아닌 음식 항목 수입니다.",
     "기록이 없다는 것은 식사나 활동이 없었다는 뜻이 아닙니다."
 ])
@@ -866,7 +915,7 @@ lines.extend([
 report = "\n".join(lines)
 
 st.download_button(
-    "📄 진료 준비 노트 TXT 다운로드",
+    "📄 진료 노트 TXT 다운로드",
     data=report.encode("utf-8-sig"),
     file_name=f"visit_note_{selected_id[:8]}.txt",
     mime="text/plain",
