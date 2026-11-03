@@ -1,9 +1,12 @@
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_local_now
+)
 from sidebar_menu import show_sidebar_menu
 
 
@@ -88,7 +91,12 @@ def fridge_expiry_display(value, today):
     )
 
 
-def show_shared_fridge(client, user_id, today):
+def show_shared_fridge(
+    client,
+    user_id,
+    today,
+    timezone_name
+):
     st.divider()
     st.subheader("🧊 우리 가족 냉장고")
 
@@ -98,7 +106,7 @@ def show_shared_fridge(client, user_id, today):
     )
 
     st.caption(
-        f"기한 판단 기준: 대한민국 날짜 {today:%Y-%m-%d}. "
+        f"기한 판단 기준: {timezone_name} 날짜 {today:%Y-%m-%d}. "
         "화면을 다시 불러올 때 갱신돼요."
     )
 
@@ -252,13 +260,14 @@ profile_menu = show_sidebar_menu("pages/home.py")
 
 client, user = require_login()
 
-now = datetime.now(ZoneInfo("Asia/Seoul"))
+timezone_name = get_timezone_name()
+now = get_local_now()
 today = now.date()
 
 st.title("🏠 우리 가족 케어")
 
 st.caption(
-    f"대한민국 기준 {today:%Y-%m-%d} · "
+    f"{timezone_name} 기준 {today:%Y-%m-%d} · "
     "나와 가족, 반려동물의 기록을 한눈에 확인해요."
 )
 
@@ -394,7 +403,8 @@ if st.button("🔄 최신 기록 다시 불러오기"):
 show_shared_fridge(
     client,
     user.id,
-    today
+    today,
+    timezone_name
 )
 
 
