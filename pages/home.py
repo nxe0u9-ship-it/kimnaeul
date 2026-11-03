@@ -42,13 +42,64 @@ def move_to_profile(profile_id, path):
     st.switch_page(path)
 
 
-def show_shared_fridge(client, user_id):
+def fridge_expiry_display(value, today):
+    if value is None or value == "":
+        return "미입력", "기한 미입력", "missing"
+
+    try:
+        if isinstance(value, datetime):
+            expiry = value.date()
+
+        elif isinstance(value, date):
+            expiry = value
+
+        else:
+            expiry = date.fromisoformat(
+                str(value).strip()
+            )
+
+    except (ValueError, TypeError):
+        return (
+            "확인 필요",
+            "⚠️ 날짜 확인 필요",
+            "invalid"
+        )
+
+    remaining = (expiry - today).days
+
+    if remaining < 0:
+        return (
+            expiry.isoformat(),
+            f"🔴 기한 지남 · {-remaining}일 경과",
+            "expired"
+        )
+
+    if remaining == 0:
+        return (
+            expiry.isoformat(),
+            "🟠 오늘까지",
+            "today"
+        )
+
+    return (
+        expiry.isoformat(),
+        f"기한까지 {remaining}일",
+        "upcoming"
+    )
+
+
+def show_shared_fridge(client, user_id, today):
     st.divider()
     st.subheader("🧊 우리 가족 냉장고")
 
     st.caption(
         "같은 계정의 가족과 반려동물이 공유하는 재료예요. "
         "홈에서는 목록만 확인할 수 있어요."
+    )
+
+    st.caption(
+        f"기한 판단 기준: 대한민국 날짜 {today:%Y-%m-%d}. "
+        "화면을 다시 불러올 때 갱신돼요."
     )
 
     try:
@@ -79,9 +130,23 @@ def show_shared_fridge(client, user_id):
 
             else:
                 ingredient_table = []
+                expired_count = 0
+                today_count = 0
+                invalid_count = 0
 
                 for item in ingredients:
                     amount = item.get("amount")
+
+                    expiry_label, status, category = (
+                        fridge_expiry_display(
+                            item.get("expiry_date"),
+                            today
+                        )
+                    )
+
+                    expired_count += category == "expired"
+                    today_count += category == "today"
+                    invalid_count += category == "invalid"
 
                     ingredient_table.append({
                         "재료명": (
@@ -97,7 +162,9 @@ def show_shared_fridge(client, user_id):
                             item.get("unit") or ""
                             if amount is not None
                             else "—"
-                        )
+                        ),
+                        "유통·소비기한": expiry_label,
+                        "상태": status
                     })
 
                 st.caption(
@@ -105,16 +172,44 @@ def show_shared_fridge(client, user_id):
                     f"{len(ingredient_table)}종류"
                 )
 
+                if expired_count:
+                    st.warning(
+                        f"기한이 지난 재료가 "
+                        f"{expired_count}종류 있어요. "
+                        "냉장고 페이지에서 확인하고 "
+                        "삭제할 수 있어요."
+                    )
+
+                if today_count:
+                    st.info(
+                        "입력한 기한이 오늘까지인 재료가 "
+                        f"{today_count}종류 있어요."
+                    )
+
+                if invalid_count:
+                    st.warning(
+                        "날짜를 확인할 수 없는 재료가 있어요. "
+                        "냉장고 페이지에서 기한을 수정해 주세요."
+                    )
+
                 # 편집 기능이 없는 조회용 표
                 st.dataframe(
                     ingredient_table,
                     column_order=[
                         "재료명",
                         "보유량",
-                        "단위"
+                        "단위",
+                        "유통·소비기한",
+                        "상태"
                     ],
                     hide_index=True,
                     use_container_width=True
+                )
+
+                st.caption(
+                    "기한이 지난 재료는 자동 삭제되지 않아요. "
+                    "표시된 날짜와 별개로 "
+                    "실제 보관 상태를 확인해 주세요."
                 )
 
     except Exception as error:
@@ -296,7 +391,11 @@ if st.button("🔄 최신 기록 다시 불러오기"):
 
 
 # 계정 전체 공유 냉장고 목록
-show_shared_fridge(client, user.id)
+show_shared_fridge(
+    client,
+    user.id,
+    today
+)
 
 
 # 대상별 기록 카드
