@@ -162,7 +162,6 @@ def finish_cookie_job():
         same_site="lax"
     )
 
-    # 응답 전의 None과 실제 빈 쿠키 목록을 구분한다.
     browser_cookies = manager.cookie_manager(
         method="getAll",
         key=(
@@ -229,8 +228,6 @@ def logout_here(client):
         pass
 
     st.session_state.clear()
-
-    # 현재 연결의 최초 쿠키로 다시 로그인되지 않게 한다.
     st.session_state.care_restore_checked = True
     st.session_state.care_auth_notice = "로그아웃했어요."
 
@@ -441,6 +438,138 @@ def show_first_login_confirmation(client, user):
     st.stop()
 
 
+# 별도 연결에서 비밀번호를 확인하고 본인 계정 삭제 함수 호출
+def delete_account_with_password(user, password):
+    verifier = create_client(
+        st.secrets["SUPABASE_URL"].strip().rstrip("/"),
+        st.secrets["SUPABASE_KEY"].strip(),
+        options=ClientOptions(auto_refresh_token=False)
+    )
+
+    try:
+        try:
+            result = verifier.auth.sign_in_with_password({
+                "email": user.email,
+                "password": password
+            })
+
+        except Exception:
+            raise ValueError(
+                "본인 확인에 실패했어요. "
+                "현재 비밀번호와 연결 상태를 확인해 주세요."
+            ) from None
+
+        if (
+            not result.session
+            or not result.user
+            or str(result.user.id) != str(user.id)
+        ):
+            raise ValueError(
+                "로그인한 계정과 확인된 계정이 일치하지 않아요."
+            )
+
+        verifier.rpc(
+            "delete_my_account",
+            {"confirmation": "회원 탈퇴"}
+        ).execute()
+
+    finally:
+        try:
+            verifier.auth.sign_out({"scope": "local"})
+        except Exception:
+            pass
+
+
+# 회원 탈퇴 확인 창
+@st.dialog("회원 탈퇴")
+def show_account_deletion(user):
+    st.write(f"탈퇴할 계정: {user.email}")
+
+    st.warning(
+        "이 계정에 등록한 모든 사람·반려동물의 관리 대상, "
+        "혈당 기록, 식사·활동·수면 기록, "
+        "냉장고 재료와 식사 조건, 진료 노트를 함께 삭제해요. "
+        "삭제한 내용은 앱에서 복구할 수 없어요."
+    )
+
+    st.caption(
+        "필요한 기록은 탈퇴 전에 "
+        "각 기록 페이지에서 다운로드해 주세요."
+    )
+
+    with st.form(
+        "care_delete_account_form",
+        clear_on_submit=True
+    ):
+        password = st.text_input(
+            "현재 비밀번호를 다시 입력해 주세요.",
+            type="password"
+        )
+
+        confirmation = st.text_input(
+            "확인을 위해 ‘회원 탈퇴’를 입력해 주세요."
+        )
+
+        confirmed = st.checkbox(
+            "계정과 연결된 모든 기록이 삭제되는 것을 확인했어요."
+        )
+
+        submitted = st.form_submit_button(
+            "계정과 모든 기록을 삭제하고 탈퇴",
+            use_container_width=True
+        )
+
+    if not submitted:
+        return
+
+    if not password:
+        st.warning("현재 비밀번호를 입력해 주세요.")
+        return
+
+    if confirmation.strip() != "회원 탈퇴":
+        st.warning(
+            "확인 문구 ‘회원 탈퇴’를 정확하게 입력해 주세요."
+        )
+        return
+
+    if not confirmed:
+        st.warning("삭제 확인란을 체크해 주세요.")
+        return
+
+    try:
+        with st.spinner(
+            "본인 확인 후 회원 탈퇴를 처리하고 있어요."
+        ):
+            delete_account_with_password(
+                user,
+                password
+            )
+
+    except ValueError as error:
+        st.error(str(error))
+        return
+
+    except Exception:
+        st.error(
+            "회원 탈퇴 결과를 확인하지 못했어요. "
+            "다시 로그인하여 계정 상태를 확인해 주세요. "
+            "계정이 유지되어 있다면 "
+            "Supabase 삭제 함수 설정도 확인해 주세요."
+        )
+        return
+
+    # 탈퇴 후 모든 화면 상태와 로그인 유지 정보 정리
+    st.session_state.clear()
+    st.session_state.care_restore_checked = True
+    st.session_state.care_auth_notice = (
+        "회원 탈퇴가 완료됐어요. "
+        "계정과 연결된 기록을 삭제했어요."
+    )
+
+    queue_cookie_clear()
+    st.rerun()
+
+
 # 로그인 여부 확인 및 로그인·회원가입 화면
 def require_login():
     finish_cookie_job()
@@ -488,6 +617,12 @@ def require_login():
             use_container_width=True
         ):
             logout_here(client)
+
+        if st.sidebar.button(
+            "회원 탈퇴",
+            use_container_width=True
+        ):
+            show_account_deletion(user)
 
         show_first_login_confirmation(
             client,
