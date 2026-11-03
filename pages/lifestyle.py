@@ -1,13 +1,16 @@
 from datetime import date, datetime, time, timedelta
 from hashlib import sha256
-from zoneinfo import ZoneInfo
 import json
 import math
 
 import pandas as pd
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_local_now
+)
 from sidebar_menu import show_sidebar_menu
 
 
@@ -286,12 +289,14 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
         return
 
     scope = f"{user_id}_{profile_id}"
+    timezone_name = get_timezone_name()
+
     prefix = (
         f"lifestyle_edit_{scope}_{row['id']}_"
-        f"{fingerprint(row)}"
+        f"{fingerprint(row)}_{timezone_name}"
     )
 
-    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    now = get_local_now()
     original_day = date.fromisoformat(row["record_date"])
 
     original_clock = time.fromisoformat(
@@ -305,10 +310,15 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
     )
 
     st.markdown("### ✏️ 선택한 기록 수정")
+
     st.caption(
         f"기록 종류: {TYPE_LABELS[kind]} · "
         "종류는 유지하고 내용을 수정해요. "
         "기존 혈당 기록과의 연결도 유지돼요."
+    )
+
+    st.caption(
+        f"수정 날짜·시간 기준: {timezone_name}"
     )
 
     form = {}
@@ -447,7 +457,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
         values = build_edit_values(
             kind,
             form,
-            datetime.now(ZoneInfo("Asia/Seoul"))
+            get_local_now()
         )
 
         check_activity_conflict(
@@ -542,6 +552,7 @@ profile_menu = show_sidebar_menu("pages/lifestyle.py")
 
 # 로그인 확인
 client, user = require_login()
+timezone_name = get_timezone_name()
 
 
 # 관리 대상 불러오기
@@ -623,16 +634,24 @@ with profile_menu:
 
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
-scope = f"{user.id}_{profile_id}"
 
-now = datetime.now(ZoneInfo("Asia/Seoul"))
+scope = f"{user.id}_{profile_id}"
+ui_scope = f"{scope}_{timezone_name}"
+
+now = get_local_now()
 today = now.date()
 clock = now.time().replace(second=0, microsecond=0)
 
 st.title("📝 식사·활동 기록")
+
 st.caption(
     "실제로 먹은 음식과 활동을 날짜·시간·양으로 기록해요. "
     "입력하지 않은 항목은 ‘없음’으로 판단하지 않아요."
+)
+
+st.caption(
+    f"날짜·시간 기준: {timezone_name} · "
+    f"현재 시각 {now:%Y-%m-%d %H:%M}"
 )
 
 st.subheader(f"{profile['name']}의 식사·활동")
@@ -648,7 +667,7 @@ selected_type = st.radio(
     "무엇을 기록할까요?",
     list(TYPES),
     horizontal=True,
-    key=f"lifestyle_type_{scope}"
+    key=f"lifestyle_type_{ui_scope}"
 )
 
 record_type = TYPES[selected_type]
@@ -674,7 +693,7 @@ if record_type == "meal":
         max_value=10,
         value=1,
         step=1,
-        key=f"food_count_{scope}"
+        key=f"food_count_{ui_scope}"
     )
 
 elif record_type == "activity":
@@ -690,7 +709,7 @@ elif record_type == "activity":
     activity_name = st.selectbox(
         "활동 종류",
         activities,
-        key=f"activity_kind_{scope}"
+        key=f"activity_kind_{ui_scope}"
     )
 
     if activity_name == "기타":
@@ -698,7 +717,7 @@ elif record_type == "activity":
             "기타 활동 입력",
             placeholder="예: 계단 오르기, 배드민턴, 공놀이",
             max_chars=100,
-            key=f"custom_activity_{scope}_{revision}"
+            key=f"custom_activity_{ui_scope}_{revision}"
         )
 
         st.caption(
@@ -725,7 +744,7 @@ else:
 
 
 form_key = (
-    f"lifestyle_form_{scope}_{record_type}_{revision}"
+    f"lifestyle_form_{ui_scope}_{record_type}_{revision}"
 )
 
 
@@ -858,6 +877,10 @@ with st.form(form_key):
 
 # 입력 검증과 저장
 if submitted:
+    # 저장 버튼을 누른 시점의 현지 날짜·시간으로 다시 확인해요.
+    now = get_local_now()
+    today = now.date()
+
     try:
         values = {
             "user_id": user.id,
@@ -1037,19 +1060,19 @@ c1, c2 = st.columns(2)
 start = c1.date_input(
     "조회 시작일",
     value=today - timedelta(days=6),
-    key=f"lifestyle_start_{scope}"
+    key=f"lifestyle_start_{ui_scope}"
 )
 
 end = c2.date_input(
     "조회 종료일",
     value=today,
-    key=f"lifestyle_end_{scope}"
+    key=f"lifestyle_end_{ui_scope}"
 )
 
 kind_filter = st.selectbox(
     "기록 종류",
     ["전체"] + list(TYPE_LABELS.values()),
-    key=f"lifestyle_filter_{scope}"
+    key=f"lifestyle_filter_{ui_scope}"
 )
 
 if start > end:
@@ -1114,7 +1137,7 @@ event = st.dataframe(
     use_container_width=True,
     on_select="rerun",
     selection_mode="single-row",
-    key=f"lifestyle_table_{scope}_{fingerprint(rows)}"
+    key=f"lifestyle_table_{ui_scope}_{fingerprint(rows)}"
 )
 
 st.download_button(
@@ -1122,7 +1145,7 @@ st.download_button(
     data=table.to_csv(index=False).encode("utf-8-sig"),
     file_name="lifestyle_records.csv",
     mime="text/csv",
-    key=f"lifestyle_csv_{scope}"
+    key=f"lifestyle_csv_{ui_scope}"
 )
 
 
@@ -1149,7 +1172,7 @@ if positions and 0 <= positions[0] < len(rows):
     )
 
     with st.form(
-        f"lifestyle_delete_{scope}_{row['id']}_{fingerprint(row)}"
+        f"lifestyle_delete_{ui_scope}_{row['id']}_{fingerprint(row)}"
     ):
         st.warning(
             "선택한 한 행을 삭제해요. "
