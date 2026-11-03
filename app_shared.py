@@ -13,11 +13,9 @@ from supabase import ClientOptions, create_client
 
 
 REMEMBER_SECONDS = 7 * 24 * 60 * 60
-
 APP_URL = "https://kimnaeul-nfmpatlk9u3uysxmtesvuq.streamlit.app/"
 
 
-# 접속자별로 Supabase 연결을 보관한다.
 def get_client():
     if "care_client" not in st.session_state:
         key = st.secrets["SUPABASE_KEY"].strip()
@@ -50,14 +48,12 @@ def get_client():
     return st.session_state.care_client
 
 
-# 프로젝트별 로그인 쿠키 이름
 def cookie_name():
     project = st.secrets["SUPABASE_URL"].strip().rstrip("/")
     suffix = sha256(project.encode()).hexdigest()[:12]
     return f"__Secure-care_login_{suffix}"
 
 
-# 서버의 Secrets로 암호화 키 생성
 def cookie_cipher():
     secret = str(
         st.secrets.get("LOGIN_COOKIE_SECRET", "")
@@ -72,22 +68,18 @@ def cookie_cipher():
     key = base64.urlsafe_b64encode(
         sha256(secret.encode()).digest()
     )
-
     return Fernet(key)
 
 
-# 세션 토큰 변경 여부 확인
 def session_signature(session, until):
     value = json.dumps([
         session.access_token,
         session.refresh_token,
         until
     ])
-
     return sha256(value.encode()).hexdigest()
 
 
-# 암호화된 로그인 유지 정보 저장 예약
 def queue_cookie_save(session, until):
     payload = json.dumps(
         {
@@ -118,7 +110,6 @@ def queue_cookie_save(session, until):
     }
 
 
-# 로그인 유지 정보 삭제 예약
 def queue_cookie_clear():
     st.session_state.care_cookie_job = {
         "id": uuid4().hex,
@@ -129,7 +120,6 @@ def queue_cookie_clear():
     }
 
 
-# 브라우저가 저장·삭제 결과를 응답한 후 다음 화면으로 이동
 def finish_cookie_job():
     job = st.session_state.get("care_cookie_job")
 
@@ -142,8 +132,7 @@ def finish_cookie_job():
 
     expires = (
         datetime.fromtimestamp(
-            job["until"],
-            timezone.utc
+            job["until"], timezone.utc
         )
         if job["value"]
         else datetime(
@@ -186,13 +175,8 @@ def finish_cookie_job():
         )
 
     if verified:
-        st.session_state.care_cookie_signature = (
-            job["signature"]
-        )
-        st.session_state.pop(
-            "care_cookie_job",
-            None
-        )
+        st.session_state.care_cookie_signature = job["signature"]
+        st.session_state.pop("care_cookie_job", None)
         st.rerun()
 
     st.info(
@@ -220,7 +204,6 @@ def finish_cookie_job():
     st.stop()
 
 
-# 현재 접속과 브라우저의 로그인 유지 정보 정리
 def logout_here(client):
     try:
         client.auth.sign_out({"scope": "local"})
@@ -235,14 +218,39 @@ def logout_here(client):
     st.rerun()
 
 
-# 새로고침 후 저장된 로그인 복원
+# 브라우저가 실제 쿠키 목록을 보낼 때까지 기다린다.
 def restore_login(client):
     if st.session_state.get("care_restore_checked"):
         return
 
-    encrypted = st.context.cookies.get(
-        cookie_name()
+    manager = stx.CookieManager(
+        key="care_restore_cookie_init"
     )
+
+    attempt = st.session_state.get(
+        "care_restore_cookie_attempt", 0
+    )
+
+    browser_cookies = manager.cookie_manager(
+        method="getAll",
+        key=f"care_restore_cookie_read_{attempt}",
+        default=None
+    )
+
+    if not isinstance(browser_cookies, dict):
+        st.info(
+            "저장된 로그인 정보를 확인하고 있어요."
+        )
+
+        if st.button("로그인 정보 다시 확인"):
+            st.session_state.care_restore_cookie_attempt = (
+                attempt + 1
+            )
+            st.rerun()
+
+        st.stop()
+
+    encrypted = browser_cookies.get(cookie_name())
 
     if not encrypted:
         st.session_state.care_restore_checked = True
@@ -276,7 +284,6 @@ def restore_login(client):
             "로그인 유지 기간이 끝났거나 "
             "정보를 확인할 수 없어요. 다시 로그인해 주세요."
         )
-
         queue_cookie_clear()
         st.rerun()
 
@@ -298,15 +305,11 @@ def restore_login(client):
             status in {"400", "401", "403", "422"}
             or isinstance(error, ValueError)
         ):
-            st.session_state.pop(
-                "care_client",
-                None
-            )
+            st.session_state.pop("care_client", None)
             st.session_state.care_restore_checked = True
             st.session_state.care_auth_notice = (
                 "이전 로그인이 만료됐어요. 다시 로그인해 주세요."
             )
-
             queue_cookie_clear()
             st.rerun()
 
@@ -328,16 +331,17 @@ def restore_login(client):
     st.session_state.care_restore_checked = True
     st.session_state.care_remember = True
     st.session_state.care_remember_until = until
+    st.session_state.care_auth_notice = (
+        "저장된 로그인 정보를 복원했어요."
+    )
 
 
-# 갱신된 토큰을 브라우저에도 반영
 def sync_login_cookie(session):
     if not st.session_state.get("care_remember"):
         return
 
     until = st.session_state.get(
-        "care_remember_until",
-        0
+        "care_remember_until", 0
     )
 
     if until <= int(time.time()):
@@ -345,10 +349,7 @@ def sync_login_cookie(session):
         queue_cookie_clear()
         st.rerun()
 
-    signature = session_signature(
-        session,
-        until
-    )
+    signature = session_signature(session, until)
 
     if signature == st.session_state.get(
         "care_cookie_signature"
@@ -356,10 +357,7 @@ def sync_login_cookie(session):
         return
 
     try:
-        queue_cookie_save(
-            session,
-            until
-        )
+        queue_cookie_save(session, until)
 
     except ValueError:
         st.session_state.care_remember = False
@@ -372,7 +370,6 @@ def sync_login_cookie(session):
     st.rerun()
 
 
-# 공통 왼쪽 메뉴
 def show_menu():
     st.sidebar.title("🩸 당당케어")
 
@@ -393,7 +390,6 @@ def show_menu():
         )
 
 
-# 첫 로그인 후 회원가입 완료 안내
 def show_first_login_confirmation(client, user):
     metadata = user.user_metadata or {}
 
@@ -438,7 +434,6 @@ def show_first_login_confirmation(client, user):
     st.stop()
 
 
-# 별도 연결에서 비밀번호를 확인하고 본인 계정 삭제 함수 호출
 def delete_account_with_password(user, password):
     verifier = create_client(
         st.secrets["SUPABASE_URL"].strip().rstrip("/"),
@@ -480,7 +475,6 @@ def delete_account_with_password(user, password):
             pass
 
 
-# 회원 탈퇴 확인 창
 @st.dialog("회원 탈퇴")
 def show_account_deletion(user):
     st.write(f"탈퇴할 계정: {user.email}")
@@ -540,10 +534,7 @@ def show_account_deletion(user):
         with st.spinner(
             "본인 확인 후 회원 탈퇴를 처리하고 있어요."
         ):
-            delete_account_with_password(
-                user,
-                password
-            )
+            delete_account_with_password(user, password)
 
     except ValueError as error:
         st.error(str(error))
@@ -558,7 +549,6 @@ def show_account_deletion(user):
         )
         return
 
-    # 탈퇴 후 모든 화면 상태와 로그인 유지 정보 정리
     st.session_state.clear()
     st.session_state.care_restore_checked = True
     st.session_state.care_auth_notice = (
@@ -570,7 +560,6 @@ def show_account_deletion(user):
     st.rerun()
 
 
-# 로그인 여부 확인 및 로그인·회원가입 화면
 def require_login():
     finish_cookie_job()
     cookie_cipher()
@@ -601,8 +590,7 @@ def require_login():
         sync_login_cookie(session)
 
         auth_notice = st.session_state.pop(
-            "care_auth_notice",
-            None
+            "care_auth_notice", None
         )
 
         if auth_notice:
@@ -610,6 +598,12 @@ def require_login():
 
         st.sidebar.caption(
             f"로그인: {user.email}"
+        )
+
+        st.sidebar.caption(
+            "로그인 유지 사용 중"
+            if st.session_state.get("care_remember")
+            else "이번 접속에서만 로그인 중"
         )
 
         if st.sidebar.button(
@@ -624,16 +618,11 @@ def require_login():
         ):
             show_account_deletion(user)
 
-        show_first_login_confirmation(
-            client,
-            user
-        )
-
+        show_first_login_confirmation(client, user)
         return client, user
 
     auth_notice = st.session_state.pop(
-        "care_auth_notice",
-        None
+        "care_auth_notice", None
     )
 
     if auth_notice:
@@ -656,7 +645,6 @@ def require_login():
         "회원가입"
     ])
 
-    # 로그인
     with login_tab:
         with st.form(
             "login_form",
@@ -710,7 +698,6 @@ def require_login():
                                 int(time.time())
                                 + REMEMBER_SECONDS
                             )
-
                         else:
                             queue_cookie_clear()
 
@@ -730,7 +717,6 @@ def require_login():
                             "가입 확인 메일의 인증 링크를 "
                             "먼저 눌러 주세요."
                         )
-
                     else:
                         st.error(
                             "로그인하지 못했어요. "
@@ -738,7 +724,6 @@ def require_login():
                             "연결 상태를 확인해 주세요."
                         )
 
-    # 회원가입
     with signup_tab:
         st.caption(
             "가입 신청 → 메일의 Confirm email address 클릭 "
@@ -804,15 +789,10 @@ def require_login():
                         st.rerun()
 
                     signup_user = getattr(
-                        result,
-                        "user",
-                        None
+                        result, "user", None
                     )
-
                     identities = getattr(
-                        signup_user,
-                        "identities",
-                        None
+                        signup_user, "identities", None
                     )
 
                     if (
@@ -851,11 +831,7 @@ def require_login():
                     )
 
                 except Exception as error:
-                    code = getattr(
-                        error,
-                        "code",
-                        None
-                    )
+                    code = getattr(error, "code", None)
                     message = str(error).lower()
 
                     if (
@@ -871,7 +847,6 @@ def require_login():
                             "이미 가입된 이메일이에요. "
                             "위의 로그인 탭에서 로그인해 주세요."
                         )
-
                     else:
                         st.error(
                             "가입 요청을 처리하지 못했어요. "
