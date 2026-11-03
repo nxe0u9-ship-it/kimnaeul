@@ -1,7 +1,8 @@
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 import streamlit as st
+
+from app_shared import get_local_now, get_timezone_name
 
 
 LIFESTYLE_FIELDS = (
@@ -13,6 +14,7 @@ LIFESTYLE_FIELDS = (
 
 def show_error(message, error):
     st.error(message)
+
     st.caption(
         f"오류 종류: {type(error).__name__} / "
         f"오류 코드: {getattr(error, 'code', None) or '없음'}"
@@ -20,14 +22,17 @@ def show_error(message, error):
 
 
 def lifestyle_label(row):
-    clock = str(row.get("record_time") or "")[:5]
+    clock = str(
+        row.get("record_time") or ""
+    )[:5]
+
     name = row.get("item_name") or "이름 미입력"
 
     kind = {
         "meal": "식사",
         "activity": "운동·산책",
         "sleep": "수면",
-        "no_activity": "활동 없음"
+        "no_activity": "활동 없음",
     }.get(row["record_type"], row["record_type"])
 
     return (
@@ -60,26 +65,38 @@ def lifestyle_table(rows):
             )
 
             if row.get("intensity"):
-                details += f" · 강도 {row['intensity']}"
+                details += (
+                    f" · 강도 {row['intensity']}"
+                )
 
         result.append({
             "날짜": row["record_date"],
-            "시간": str(row.get("record_time") or "")[:5],
+            "시간": str(
+                row.get("record_time") or ""
+            )[:5],
             "종류": {
                 "meal": "식사",
                 "activity": "운동·산책",
                 "sleep": "수면",
-                "no_activity": "활동 없음"
-            }.get(row["record_type"], row["record_type"]),
+                "no_activity": "활동 없음",
+            }.get(
+                row["record_type"],
+                row["record_type"],
+            ),
             "음식·활동": row.get("item_name") or "",
             "상세": details,
-            "메모": row.get("memo") or ""
+            "메모": row.get("memo") or "",
         })
 
     return result
 
 
-def load_link_ids(client, user_id, profile_id, glucose_id):
+def load_link_ids(
+    client,
+    user_id,
+    profile_id,
+    glucose_id,
+):
     result = []
     offset = 0
 
@@ -105,12 +122,19 @@ def load_link_ids(client, user_id, profile_id, glucose_id):
         )
 
         if len(result) > 10000:
-            raise ValueError("연결된 기록이 너무 많아 조회를 중단했어요.")
+            raise ValueError(
+                "연결된 기록이 너무 많아 조회를 중단했어요."
+            )
 
         offset += len(batch)
 
 
-def load_linked_records(client, user_id, profile_id, linked_ids):
+def load_linked_records(
+    client,
+    user_id,
+    profile_id,
+    linked_ids,
+):
     rows = []
 
     for offset in range(0, len(linked_ids), 100):
@@ -133,14 +157,21 @@ def load_linked_records(client, user_id, profile_id, linked_ids):
         key=lambda row: (
             row["record_date"],
             str(row.get("record_time") or ""),
-            str(row["id"])
-        )
+            str(row["id"]),
+        ),
     )
 
 
 # 기록 확인 페이지 등에서 사용하는 조회 전용 화면
-def show_linked_records(client, user_id, profile_id, glucose_id):
-    st.markdown("**🔗 이 혈당에 연결된 식사·활동**")
+def show_linked_records(
+    client,
+    user_id,
+    profile_id,
+    glucose_id,
+):
+    st.markdown(
+        "**🔗 이 혈당에 연결된 식사·활동**"
+    )
 
     try:
         blood_rows = (
@@ -165,20 +196,20 @@ def show_linked_records(client, user_id, profile_id, glucose_id):
             client,
             user_id,
             profile_id,
-            glucose_id
+            glucose_id,
         )
 
         linked_rows = load_linked_records(
             client,
             user_id,
             profile_id,
-            linked_ids
+            linked_ids,
         )
 
     except Exception as error:
         show_error(
             "연결된 식사·활동을 불러오지 못했어요.",
-            error
+            error,
         )
         return
 
@@ -189,12 +220,14 @@ def show_linked_records(client, user_id, profile_id, glucose_id):
         )
 
     else:
-        st.caption(f"연결된 식사·활동 {len(linked_rows)}건")
+        st.caption(
+            f"연결된 식사·활동 {len(linked_rows)}건"
+        )
 
         st.dataframe(
             lifestyle_table(linked_rows),
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
     if len(linked_rows) < len(linked_ids):
@@ -211,21 +244,39 @@ def show_linked_records(client, user_id, profile_id, glucose_id):
     st.page_link(
         "pages/record.py",
         label="식사·활동 연결 추가·해제하기",
-        icon="🔗"
+        icon="🔗",
     )
 
 
-def show_record_links(client, user_id, profile_id):
+def show_record_links(
+    client,
+    user_id,
+    profile_id,
+):
     scope = f"{user_id}_{profile_id}"
-    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+
+    timezone_name = get_timezone_name()
+    today = get_local_now().date()
+
+    # 시간대나 날짜가 바뀌면 조회 입력값도 갱신
+    ui_scope = (
+        f"{scope}_{timezone_name}_{today.isoformat()}"
+    )
+
     notice_key = f"record_links_notice_{scope}"
 
     st.divider()
     st.subheader("🔗 혈당과 식사·활동 연결")
+
     st.caption(
         "혈당 기록을 선택한 뒤 관련된 식사나 운동 기록을 연결해요. "
         "연결은 사용자가 선택한 관계이며, "
         "혈당 변화의 원인을 자동으로 판단하지 않아요."
+    )
+
+    st.caption(
+        f"조회 날짜 기준: {today:%Y-%m-%d} ({timezone_name}). "
+        "혈당과 식사·활동의 날짜·시간은 저장된 값을 그대로 표시해요."
     )
 
     notice = st.session_state.pop(notice_key, None)
@@ -239,18 +290,20 @@ def show_record_links(client, user_id, profile_id):
         "연결할 혈당 조회 시작일",
         value=today - timedelta(days=29),
         max_value=today,
-        key=f"link_blood_start_{scope}"
+        key=f"link_blood_start_{ui_scope}",
     )
 
     end = c2.date_input(
         "연결할 혈당 조회 종료일",
         value=today,
         max_value=today,
-        key=f"link_blood_end_{scope}"
+        key=f"link_blood_end_{ui_scope}",
     )
 
     if start > end:
-        st.warning("조회 시작일은 종료일보다 늦을 수 없어요.")
+        st.warning(
+            "조회 시작일은 종료일보다 늦을 수 없어요."
+        )
         return
 
     try:
@@ -272,7 +325,10 @@ def show_record_links(client, user_id, profile_id):
         ) or []
 
     except Exception as error:
-        show_error("연결할 혈당 기록을 불러오지 못했어요.", error)
+        show_error(
+            "연결할 혈당 기록을 불러오지 못했어요.",
+            error,
+        )
         return
 
     if not blood_rows:
@@ -307,24 +363,34 @@ def show_record_links(client, user_id, profile_id):
         "식사·활동을 연결할 혈당 기록",
         list(blood_map),
         format_func=blood_label,
-        key=f"link_blood_choice_{scope}"
+        key=f"link_blood_choice_{ui_scope}",
     )
 
     blood = blood_map[selected_key]
     glucose_id = blood["record_id"]
-    record_scope = f"{scope}_{selected_key}"
+
+    record_scope = f"{ui_scope}_{selected_key}"
 
     try:
         linked_ids = load_link_ids(
-            client, user_id, profile_id, glucose_id
+            client,
+            user_id,
+            profile_id,
+            glucose_id,
         )
 
         linked_rows = load_linked_records(
-            client, user_id, profile_id, linked_ids
+            client,
+            user_id,
+            profile_id,
+            linked_ids,
         )
 
     except Exception as error:
-        show_error("현재 연결된 기록을 불러오지 못했어요.", error)
+        show_error(
+            "현재 연결된 기록을 불러오지 못했어요.",
+            error,
+        )
         return
 
     st.markdown("**현재 연결된 식사·활동**")
@@ -333,16 +399,18 @@ def show_record_links(client, user_id, profile_id):
         st.dataframe(
             lifestyle_table(linked_rows),
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
     else:
-        st.caption("아직 연결된 식사·활동 기록이 없어요.")
+        st.caption(
+            "아직 연결된 식사·활동 기록이 없어요."
+        )
 
     # 연결할 생활 기록 찾기
     blood_day = min(
         date.fromisoformat(blood["measure_date"]),
-        today
+        today,
     )
 
     c1, c2 = st.columns(2)
@@ -351,18 +419,20 @@ def show_record_links(client, user_id, profile_id):
         "식사·활동 조회 시작일",
         value=blood_day - timedelta(days=1),
         max_value=today,
-        key=f"link_activity_start_{record_scope}"
+        key=f"link_activity_start_{record_scope}",
     )
 
     activity_end = c2.date_input(
         "식사·활동 조회 종료일",
         value=blood_day,
         max_value=today,
-        key=f"link_activity_end_{record_scope}"
+        key=f"link_activity_end_{record_scope}",
     )
 
     if activity_start > activity_end:
-        st.warning("식사·활동 조회 시작일을 확인해 주세요.")
+        st.warning(
+            "식사·활동 조회 시작일을 확인해 주세요."
+        )
         return
 
     try:
@@ -372,8 +442,14 @@ def show_record_links(client, user_id, profile_id):
             .eq("user_id", user_id)
             .eq("profile_id", profile_id)
             .in_("record_type", ["meal", "activity"])
-            .gte("record_date", activity_start.isoformat())
-            .lte("record_date", activity_end.isoformat())
+            .gte(
+                "record_date",
+                activity_start.isoformat(),
+            )
+            .lte(
+                "record_date",
+                activity_end.isoformat(),
+            )
             .order("record_date", desc=True)
             .order("record_time", desc=True)
             .order("id")
@@ -383,7 +459,10 @@ def show_record_links(client, user_id, profile_id):
         ) or []
 
     except Exception as error:
-        show_error("식사·활동 목록을 불러오지 못했어요.", error)
+        show_error(
+            "식사·활동 목록을 불러오지 못했어요.",
+            error,
+        )
         return
 
     linked_set = set(linked_ids)
@@ -401,25 +480,31 @@ def show_record_links(client, user_id, profile_id):
     )
 
     if available:
-        with st.form(f"link_add_form_{record_scope}"):
+        with st.form(
+            f"link_add_form_{record_scope}"
+        ):
             selected_ids = st.multiselect(
                 "추가로 연결할 식사·활동",
                 list(available),
                 format_func=lambda item: lifestyle_label(
                     available[item]
-                )
+                ),
             )
 
             add_clicked = st.form_submit_button(
                 "🔗 선택한 기록 연결",
-                use_container_width=True
+                use_container_width=True,
             )
 
         if add_clicked:
             if not selected_ids:
-                st.warning("연결할 기록을 선택해 주세요.")
+                st.warning(
+                    "연결할 기록을 선택해 주세요."
+                )
 
-            elif len(linked_set | set(selected_ids)) > 100:
+            elif len(
+                linked_set | set(selected_ids)
+            ) > 100:
                 st.warning(
                     "혈당 기록 한 건에는 식사·활동을 "
                     "최대 100건까지 연결할 수 있어요."
@@ -431,20 +516,25 @@ def show_record_links(client, user_id, profile_id):
                         "glucose_record_id": glucose_id,
                         "lifestyle_record_id": item,
                         "user_id": user_id,
-                        "profile_id": profile_id
+                        "profile_id": profile_id,
                     }
                     for item in selected_ids
                     if item in available
                 ]
 
                 try:
-                    client.table("glucose_lifestyle_links").insert(
+                    client.table(
+                        "glucose_lifestyle_links"
+                    ).insert(
                         payload,
-                        returning="minimal"
+                        returning="minimal",
                     ).execute()
 
                 except Exception as error:
-                    if getattr(error, "code", None) == "23505":
+                    if (
+                        getattr(error, "code", None)
+                        == "23505"
+                    ):
                         st.warning(
                             "이미 연결된 기록이 포함되어 있어요. "
                             "목록을 다시 불러온 뒤 선택해 주세요."
@@ -454,13 +544,14 @@ def show_record_links(client, user_id, profile_id):
                         show_error(
                             "연결 결과를 확인하지 못했어요. "
                             "현재 연결 목록을 다시 확인해 주세요.",
-                            error
+                            error,
                         )
 
                 else:
                     st.session_state[notice_key] = (
                         f"식사·활동 기록 {len(payload)}건을 연결했어요."
                     )
+
                     st.rerun()
 
     else:
@@ -476,13 +567,15 @@ def show_record_links(client, user_id, profile_id):
             for row in linked_rows
         }
 
-        with st.form(f"link_remove_form_{record_scope}"):
+        with st.form(
+            f"link_remove_form_{record_scope}"
+        ):
             remove_ids = st.multiselect(
                 "연결을 해제할 식사·활동",
                 list(linked_map),
                 format_func=lambda item: lifestyle_label(
                     linked_map[item]
-                )
+                ),
             )
 
             st.caption(
@@ -491,29 +584,41 @@ def show_record_links(client, user_id, profile_id):
 
             remove_clicked = st.form_submit_button(
                 "연결 해제",
-                use_container_width=True
+                use_container_width=True,
             )
 
         if remove_clicked:
             if not remove_ids:
-                st.warning("연결을 해제할 기록을 선택해 주세요.")
+                st.warning(
+                    "연결을 해제할 기록을 선택해 주세요."
+                )
 
             else:
                 try:
                     result = (
-                        client.table("glucose_lifestyle_links")
-                        .delete(returning="representation")
+                        client.table(
+                            "glucose_lifestyle_links"
+                        )
+                        .delete(
+                            returning="representation"
+                        )
                         .eq("user_id", user_id)
                         .eq("profile_id", profile_id)
-                        .eq("glucose_record_id", glucose_id)
-                        .in_("lifestyle_record_id", remove_ids)
+                        .eq(
+                            "glucose_record_id",
+                            glucose_id,
+                        )
+                        .in_(
+                            "lifestyle_record_id",
+                            remove_ids,
+                        )
                         .execute()
                     )
 
                 except Exception as error:
                     show_error(
                         "연결 해제 결과를 확인하지 못했어요.",
-                        error
+                        error,
                     )
 
                 else:
@@ -523,4 +628,5 @@ def show_record_links(client, user_id, profile_id):
                         f"연결 {count}건을 해제했어요. "
                         "원래 기록은 유지돼요."
                     )
+
                     st.rerun()
