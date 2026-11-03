@@ -30,7 +30,9 @@ def count_today(
     )
 
     if result.count is None:
-        raise ValueError("기록 건수를 확인하지 못했어요.")
+        raise ValueError(
+            "기록 건수를 확인하지 못했어요."
+        )
 
     return result.count
 
@@ -38,6 +40,100 @@ def count_today(
 def move_to_profile(profile_id, path):
     st.session_state.active_profile = profile_id
     st.switch_page(path)
+
+
+def show_shared_fridge(client, user_id):
+    st.divider()
+    st.subheader("🧊 우리 가족 냉장고")
+
+    st.caption(
+        "같은 계정의 가족과 반려동물이 공유하는 재료예요. "
+        "홈에서는 목록만 확인할 수 있어요."
+    )
+
+    try:
+        rows = (
+            client.table("family_fridges")
+            .select("ingredients")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+
+        if not rows:
+            st.info(
+                "아직 공유 냉장고를 만들지 않았어요. "
+                "냉장고 페이지에서 기존 재료를 합쳐 시작해 주세요."
+            )
+
+        else:
+            ingredients = (
+                rows[0].get("ingredients") or []
+            )
+
+            if not ingredients:
+                st.info(
+                    "냉장고에 저장된 재료가 없어요."
+                )
+
+            else:
+                ingredient_table = []
+
+                for item in ingredients:
+                    amount = item.get("amount")
+
+                    ingredient_table.append({
+                        "재료명": (
+                            item.get("name")
+                            or "이름 미입력"
+                        ),
+                        "보유량": (
+                            f"{float(amount):g}"
+                            if amount is not None
+                            else "미입력"
+                        ),
+                        "단위": (
+                            item.get("unit") or ""
+                            if amount is not None
+                            else "—"
+                        )
+                    })
+
+                st.caption(
+                    f"저장된 재료 "
+                    f"{len(ingredient_table)}종류"
+                )
+
+                # 편집 기능이 없는 조회용 표
+                st.dataframe(
+                    ingredient_table,
+                    column_order=[
+                        "재료명",
+                        "보유량",
+                        "단위"
+                    ],
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+    except Exception as error:
+        show_error(
+            "공유 냉장고 목록을 불러오지 못했어요. "
+            "냉장고 페이지에서 저장 상태를 확인해 주세요.",
+            error
+        )
+
+    st.page_link(
+        "pages/meal.py",
+        label="냉장고 관리·식단 추천으로 이동",
+        icon="🍽️"
+    )
+
+    st.caption(
+        "재료 추가·수정·삭제·초기화와 식단 추천은 "
+        "냉장고 페이지에서 할 수 있어요."
+    )
 
 
 st.set_page_config(
@@ -65,6 +161,7 @@ now = datetime.now(ZoneInfo("Asia/Seoul"))
 today = now.date()
 
 st.title("🏠 우리 가족 케어")
+
 st.caption(
     f"대한민국 기준 {today:%Y-%m-%d} · "
     "나와 가족, 반려동물의 기록을 한눈에 확인해요."
@@ -89,17 +186,21 @@ except Exception as error:
     )
     st.stop()
 
+
 if not profiles:
     st.info(
         "아직 등록된 관리 대상이 없어요. "
         "먼저 나와 가족, 반려동물을 등록해 주세요."
     )
+
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
         icon="➕"
     )
+
     st.stop()
+
 
 profile_map = {
     item["id"]: item
@@ -120,10 +221,12 @@ with profile_menu:
             if item["profile_type"] == "사람"
             else "🐾"
         )
+
         kind = (
             item.get("animal_type")
             or item["profile_type"]
         )
+
         label = f"{icon} {item['name']} · {kind}"
 
         if sum(
@@ -160,9 +263,20 @@ pet_count = sum(
 
 c1, c2, c3 = st.columns(3)
 
-c1.metric("등록된 관리 대상", str(len(profiles)))
-c2.metric("사람", f"{people_count}명")
-c3.metric("반려동물", f"{pet_count}마리")
+c1.metric(
+    "등록된 관리 대상",
+    str(len(profiles))
+)
+
+c2.metric(
+    "사람",
+    f"{people_count}명"
+)
+
+c3.metric(
+    "반려동물",
+    f"{pet_count}마리"
+)
 
 
 # 관리 대상 추가 바로가기
@@ -181,6 +295,10 @@ if st.button("🔄 최신 기록 다시 불러오기"):
     st.rerun()
 
 
+# 계정 전체 공유 냉장고 목록
+show_shared_fridge(client, user.id)
+
+
 # 대상별 기록 카드
 st.subheader("🩸 대상별 최근 기록")
 
@@ -191,10 +309,12 @@ st.caption(
 
 for item in profiles:
     profile_id = item["id"]
+
     kind = (
         item.get("animal_type")
         or item["profile_type"]
     )
+
     icon = (
         "👤"
         if item["profile_type"] == "사람"
@@ -270,7 +390,10 @@ for item in profiles:
                 )
 
             else:
-                c1.metric("최근 혈당", "기록 없음")
+                c1.metric(
+                    "최근 혈당",
+                    "기록 없음"
+                )
 
             c2.metric(
                 "오늘 날짜의 혈당 기록",
@@ -286,6 +409,7 @@ for item in profiles:
                 st.info(
                     "오늘 날짜로 저장된 혈당 기록이 없어요."
                 )
+
             else:
                 st.success(
                     "오늘 날짜의 혈당 기록이 저장되어 있어요."
@@ -369,13 +493,19 @@ else:
         )
 
     for visit in visit_rows[:20]:
-        target = profile_map.get(visit["profile_id"])
+        target = profile_map.get(
+            visit["profile_id"]
+        )
 
         if target is None:
             continue
 
-        visit_day = date.fromisoformat(visit["visit_date"])
+        visit_day = date.fromisoformat(
+            visit["visit_date"]
+        )
+
         remaining = (visit_day - today).days
+
         day_label = (
             "오늘"
             if remaining == 0
@@ -386,6 +516,7 @@ else:
             st.markdown(
                 f"**{visit['visit_date']} · {day_label}**"
             )
+
             st.write(
                 f"{target['name']} · {visit['title']}"
             )
