@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 
-from app_shared import require_login
+from app_shared import (
+    require_login,
+    get_timezone_name,
+    get_local_now
+)
 from sidebar_menu import show_sidebar_menu
 
 
@@ -244,13 +247,19 @@ div.stButton > button {
 # 현재 페이지 메뉴 바로 아래에 관리 대상 선택 영역 배치
 profile_menu = show_sidebar_menu("pages/explore.py")
 
-
 client, user = require_login()
+timezone_name = get_timezone_name()
 
 st.title("🔍 내 기록 탐구실")
+
 st.caption(
     "내가 저장한 혈당과 식사·활동 기록을 "
     "조건별로 살펴봐요."
+)
+
+st.caption(
+    f"조회 날짜 기준: {timezone_name}. "
+    "시간대별 통계와 타임라인은 저장된 측정·기록 시각을 사용해요."
 )
 
 
@@ -327,25 +336,27 @@ with profile_menu:
 
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
+
 scope = f"{user.id}_{profile_id}"
+ui_scope = f"{scope}_{timezone_name}"
 
 st.subheader(f"{profile['name']}의 기록 탐색")
 
-today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+today = get_local_now().date()
 
 c1, c2 = st.columns(2)
 
 start = c1.date_input(
     "조회 시작일",
     value=today - timedelta(days=29),
-    key=f"explore_start_{scope}"
+    key=f"explore_start_{ui_scope}"
 )
 
 end = c2.date_input(
     "조회 종료일",
     value=today,
     max_value=today,
-    key=f"explore_end_{scope}"
+    key=f"explore_end_{ui_scope}"
 )
 
 if start > end:
@@ -420,7 +431,7 @@ st.info(
 meal_filter = st.selectbox(
     "통계에서 비교할 측정 시점",
     MEALS,
-    key=f"explore_meal_{scope}"
+    key=f"explore_meal_{ui_scope}"
 )
 
 st.caption(
@@ -601,7 +612,7 @@ with timeline_tab:
         value=end,
         min_value=start,
         max_value=end,
-        key=f"explore_day_{scope}_{start}_{end}"
+        key=f"explore_day_{ui_scope}_{start}_{end}"
     )
 
     timeline = timeline_frame(
@@ -627,7 +638,7 @@ with timeline_tab:
             ).encode("utf-8-sig"),
             file_name=f"care_timeline_{day.isoformat()}.csv",
             mime="text/csv",
-            key=f"explore_csv_{scope}_{day}"
+            key=f"explore_csv_{ui_scope}_{day}"
         )
 
     day_blood = blood[
