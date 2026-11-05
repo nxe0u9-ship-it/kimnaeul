@@ -102,26 +102,23 @@ def display_records(rows):
             ended = started + timedelta(minutes=int(duration))
             end_text = ended.strftime("%Y-%m-%d %H:%M")
 
-        result.append(
-            {
-                "날짜": row["record_date"],
-                "시간": str(row.get("record_time") or "")[:5],
-                "종류": TYPE_LABELS.get(kind, kind),
-                "음식·활동": row.get("item_name") or "",
-                "식사 구분": row.get("meal_slot") or "",
-                "섭취량": (
-                    f"{float(amount):g} {row.get('amount_unit') or ''}"
-                    if amount is not None
-                    else ""
-                ),
-                "지속 시간(분)": (
-                    int(duration) if duration is not None else None
-                ),
-                "강도": row.get("intensity") or "",
-                "수면 종료": end_text,
-                "메모": row.get("memo") or "",
-            }
-        )
+        result.append({
+            "날짜": row["record_date"],
+            "시간": str(row.get("record_time") or "")[:5],
+            "종류": TYPE_LABELS.get(kind, kind),
+            "음식·활동": row.get("item_name") or "",
+            "식사 구분": row.get("meal_slot") or "",
+            "섭취량": (
+                f"{float(amount):g} {row.get('amount_unit') or ''}"
+                if amount is not None else ""
+            ),
+            "지속 시간(분)": (
+                int(duration) if duration is not None else None
+            ),
+            "강도": row.get("intensity") or "",
+            "수면 종료": end_text,
+            "메모": row.get("memo") or "",
+        })
 
     return pd.DataFrame(result)
 
@@ -146,8 +143,7 @@ def show_record_summary(rows, start, end, kind_filter):
     period_days = (end - start).days + 1
 
     meal_days = {
-        row["record_date"]
-        for row in rows
+        row["record_date"] for row in rows
         if row["record_type"] == "meal"
     }
 
@@ -164,22 +160,19 @@ def show_record_summary(rows, start, end, kind_filter):
     ]
 
     confirmed_days = {
-        row["record_date"]
-        for row in rows
+        row["record_date"] for row in rows
         if row["record_type"] == "no_activity"
     }
 
     metrics = []
 
     if kind_filter in ["전체", "식사"]:
-        metrics.append(
-            (
-                "🍽️ 식사 기록일",
-                f"{len(meal_days)}일 / {period_days}일",
-                "음식을 여러 개 입력한 날도 하루로 계산해요. "
-                "식사 횟수나 섭취량의 합계는 아니에요.",
-            )
-        )
+        metrics.append((
+            "🍽️ 식사 기록일",
+            f"{len(meal_days)}일 / {period_days}일",
+            "음식을 여러 개 입력한 날도 하루로 계산해요. "
+            "식사 횟수나 섭취량의 합계는 아니에요.",
+        ))
 
     if kind_filter in ["전체", "운동·산책"]:
         activity_minutes = sum(
@@ -187,46 +180,38 @@ def show_record_summary(rows, start, end, kind_filter):
             for row in activities
         )
 
-        metrics.append(
-            (
-                "🏃 총 활동 시간",
-                format_minutes(activity_minutes)
-                if activities
-                else "기록 없음",
-                "저장된 운동·산책 시간의 합계예요. "
-                "같은 시간대에 중복 저장한 기록도 각각 포함돼요.",
-            )
-        )
+        metrics.append((
+            "🏃 총 활동 시간",
+            format_minutes(activity_minutes)
+            if activities else "기록 없음",
+            "저장된 운동·산책 시간의 합계예요. "
+            "같은 시간대에 중복 저장한 기록도 각각 포함돼요.",
+        ))
 
     if kind_filter in ["전체", "수면"]:
         if sleeps:
             average = int(
                 sum(int(row["duration_minutes"]) for row in sleeps)
-                / len(sleeps)
-                + 0.5
+                / len(sleeps) + 0.5
             )
             sleep_value = format_minutes(average)
         else:
             sleep_value = "기록 없음"
 
-        metrics.append(
-            (
-                "😴 기록당 평균 수면",
-                sleep_value,
-                "잠든 날짜가 조회 기간에 포함된 수면 기록의 평균이에요. "
-                "여러 번 나눠 잔 경우 각 기록을 따로 계산하며, "
-                "분 단위로 반올림해요.",
-            )
-        )
+        metrics.append((
+            "😴 기록당 평균 수면",
+            sleep_value,
+            "잠든 날짜가 조회 기간에 포함된 수면 기록의 평균이에요. "
+            "여러 번 나눠 잔 경우 각 기록을 따로 계산하며, "
+            "분 단위로 반올림해요.",
+        ))
 
     if kind_filter == "활동 없음":
-        metrics.append(
-            (
-                "📅 활동 없음 확인일",
-                f"{len(confirmed_days)}일 / {period_days}일",
-                "직접 ‘활동 없음’을 확인해 저장한 날짜 수예요.",
-            )
-        )
+        metrics.append((
+            "📅 활동 없음 확인일",
+            f"{len(confirmed_days)}일 / {period_days}일",
+            "직접 ‘활동 없음’을 확인해 저장한 날짜 수예요.",
+        ))
 
     columns = st.columns(len(metrics))
 
@@ -293,12 +278,10 @@ def show_meal_calendar(rows, start, end, ui_scope):
 
     visible_start = max(start, first_day)
     visible_end = min(end, next_month - timedelta(days=1))
-
     grouped = {}
 
     for row in meals:
         slot = row.get("meal_slot") or "기타"
-
         if slot not in MEAL_SLOTS:
             slot = "기타"
 
@@ -332,28 +315,24 @@ def show_meal_calendar(rows, start, end, ui_scope):
 
                 amount_text = (
                     f" {float(amount):g} {unit}"
-                    if amount is not None
-                    else ""
+                    if amount is not None else ""
                 )
 
                 descriptions.append(
                     f"{clock} {name}{amount_text}".strip()
                 )
 
-            chart_rows.append(
-                {
-                    "날짜": current_day.isoformat(),
-                    "날짜 표시": label,
-                    "식사 구분": slot,
-                    "상태": "기록 있음" if items else "기록 없음",
-                    "음식 기록 수": len(items),
-                    "음식 목록": (
-                        " / ".join(descriptions)
-                        if items
-                        else "저장된 기록이 없어요."
-                    ),
-                }
-            )
+            chart_rows.append({
+                "날짜": current_day.isoformat(),
+                "날짜 표시": label,
+                "식사 구분": slot,
+                "상태": "기록 있음" if items else "기록 없음",
+                "음식 기록 수": len(items),
+                "음식 목록": (
+                    " / ".join(descriptions)
+                    if items else "저장된 기록이 없어요."
+                ),
+            })
 
         current_day += timedelta(days=1)
 
@@ -419,9 +398,7 @@ def show_meal_calendar(rows, start, end, ui_scope):
                     {"field": "음식 목록", "type": "nominal"},
                 ],
             },
-            "config": {
-                "view": {"stroke": None},
-            },
+            "config": {"view": {"stroke": None}},
         },
         use_container_width=True,
     )
@@ -514,38 +491,33 @@ def show_activity_chart(rows, start, end, ui_scope):
     chart_rows = []
 
     for (day, name), (minutes, count) in sorted(grouped.items()):
-        chart_rows.append(
-            {
-                "날짜": day,
-                "날짜 표시": labels[day],
-                "표시 종류": "활동",
-                "활동 종류": name,
-                "활동 시간(분)": minutes,
-                "활동 시간": format_minutes(minutes),
-                "날짜별 총 활동 시간": format_minutes(totals[day]),
-                "기록 수": count,
-                "상태": "활동 기록 있음",
-            }
-        )
+        chart_rows.append({
+            "날짜": day,
+            "날짜 표시": labels[day],
+            "표시 종류": "활동",
+            "활동 종류": name,
+            "활동 시간(분)": minutes,
+            "활동 시간": format_minutes(minutes),
+            "날짜별 총 활동 시간": format_minutes(totals[day]),
+            "기록 수": count,
+            "상태": "활동 기록 있음",
+        })
 
     for day, label in labels.items():
-        chart_rows.append(
-            {
-                "날짜": day,
-                "날짜 표시": label,
-                "표시 종류": "날짜 기준",
-                "활동 종류": "",
-                "활동 시간(분)": 0,
-                "활동 시간": "",
-                "날짜별 총 활동 시간": "",
-                "기록 수": 0,
-                "상태": (
-                    "활동 없음 확인"
-                    if day in confirmed_days
-                    else ""
-                ),
-            }
-        )
+        chart_rows.append({
+            "날짜": day,
+            "날짜 표시": label,
+            "표시 종류": "날짜 기준",
+            "활동 종류": "",
+            "활동 시간(분)": 0,
+            "활동 시간": "",
+            "날짜별 총 활동 시간": "",
+            "기록 수": 0,
+            "상태": (
+                "활동 없음 확인"
+                if day in confirmed_days else ""
+            ),
+        })
 
     st.caption(
         "막대 높이는 날짜별 총 활동 시간이에요. "
@@ -578,13 +550,9 @@ def show_activity_chart(rows, start, end, ui_scope):
             },
             "layer": [
                 {
-                    "transform": [
-                        {
-                            "filter": (
-                                "datum['표시 종류'] === '활동'"
-                            )
-                        }
-                    ],
+                    "transform": [{
+                        "filter": "datum['표시 종류'] === '활동'"
+                    }],
                     "mark": {
                         "type": "bar",
                         "tooltip": True,
@@ -610,14 +578,8 @@ def show_activity_chart(rows, start, end, ui_scope):
                         },
                         "tooltip": [
                             {"field": "날짜", "type": "nominal"},
-                            {
-                                "field": "활동 종류",
-                                "type": "nominal",
-                            },
-                            {
-                                "field": "활동 시간",
-                                "type": "nominal",
-                            },
+                            {"field": "활동 종류", "type": "nominal"},
+                            {"field": "활동 시간", "type": "nominal"},
                             {
                                 "field": "날짜별 총 활동 시간",
                                 "type": "nominal",
@@ -631,13 +593,9 @@ def show_activity_chart(rows, start, end, ui_scope):
                     },
                 },
                 {
-                    "transform": [
-                        {
-                            "filter": (
-                                "datum['표시 종류'] === '날짜 기준'"
-                            )
-                        }
-                    ],
+                    "transform": [{
+                        "filter": "datum['표시 종류'] === '날짜 기준'"
+                    }],
                     "mark": {
                         "type": "point",
                         "opacity": 0,
@@ -647,14 +605,12 @@ def show_activity_chart(rows, start, end, ui_scope):
                     },
                 },
                 {
-                    "transform": [
-                        {
-                            "filter": (
-                                "datum['표시 종류'] === '날짜 기준' "
-                                "&& datum['상태'] === '활동 없음 확인'"
-                            )
-                        }
-                    ],
+                    "transform": [{
+                        "filter": (
+                            "datum['표시 종류'] === '날짜 기준' "
+                            "&& datum['상태'] === '활동 없음 확인'"
+                        )
+                    }],
                     "mark": {
                         "type": "point",
                         "shape": "square",
@@ -671,9 +627,7 @@ def show_activity_chart(rows, start, end, ui_scope):
                     },
                 },
             ],
-            "config": {
-                "view": {"stroke": None},
-            },
+            "config": {"view": {"stroke": None}},
         },
         use_container_width=True,
     )
@@ -688,6 +642,234 @@ def show_activity_chart(rows, start, end, ui_scope):
         "월만 선택할 수 있어요. "
         "같은 날짜·활동 종류의 시간은 합산하며, "
         "중복되거나 시간이 겹치는 기록도 각각 포함해요."
+    )
+    st.divider()
+
+
+def show_sleep_chart(rows, start, end, ui_scope):
+    st.markdown("### 😴 잠든 시각과 일어난 시각")
+
+    sleeps = []
+    invalid_count = 0
+
+    for row in rows:
+        if row["record_type"] != "sleep":
+            continue
+
+        try:
+            started = datetime.combine(
+                date.fromisoformat(row["record_date"]),
+                time.fromisoformat(
+                    row.get("record_time") or "00:00"
+                ),
+            )
+
+            duration = int(row.get("duration_minutes") or 0)
+
+            if duration <= 0:
+                raise ValueError("수면 시간 없음")
+
+            ended = started + timedelta(minutes=duration)
+
+        except (ValueError, TypeError, OverflowError):
+            invalid_count += 1
+            continue
+
+        sleeps.append((
+            started,
+            ended,
+            duration,
+            str(row["id"]),
+        ))
+
+    if invalid_count:
+        st.warning(
+            "날짜·시간 또는 수면 시간이 올바르지 않은 "
+            f"수면 기록 {invalid_count}건은 그래프에서 제외했어요. "
+            "아래 상세 기록을 확인해 주세요."
+        )
+
+    if not sleeps:
+        st.info(
+            "선택한 기간에 그래프로 표시할 수면 기록이 없어요."
+        )
+        return
+
+    months = sorted(
+        {item[0].strftime("%Y-%m") for item in sleeps},
+        reverse=True,
+    )
+
+    selected_month = st.selectbox(
+        "수면 기록을 볼 월",
+        months,
+        format_func=lambda value: (
+            f"{value[:4]}년 {int(value[5:7])}월"
+        ),
+        key=f"sleep_chart_month_{ui_scope}_{start}_{end}",
+    )
+
+    month_sleeps = sorted(
+        [
+            item for item in sleeps
+            if item[0].strftime("%Y-%m") == selected_month
+        ],
+        key=lambda item: (item[0], item[3]),
+    )
+
+    page_size = 31
+    page_count = max(
+        1, math.ceil(len(month_sleeps) / page_size)
+    )
+    page = 1
+
+    if page_count > 1:
+        page = int(st.number_input(
+            "수면 그래프 묶음",
+            min_value=1,
+            max_value=page_count,
+            value=1,
+            step=1,
+            key=(
+                f"sleep_chart_page_{ui_scope}_{start}_{end}_"
+                f"{selected_month}_{fingerprint(month_sleeps)}"
+            ),
+            help="기록이 많으면 31건씩 나눠 표시해요.",
+        ))
+
+    offset = (page - 1) * page_size
+    visible = month_sleeps[offset:offset + page_size]
+
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+    chart_rows = []
+    labels = []
+
+    for index, item in enumerate(visible, start=offset + 1):
+        started, ended, duration, record_id = item
+
+        label = (
+            f"{started:%m/%d} "
+            f"({weekdays[started.weekday()]}) · {index}번"
+        )
+        labels.append(label)
+
+        midnight = datetime.combine(
+            started.date(), time(0, 0)
+        )
+
+        chart_rows.append({
+            "수면 기록": label,
+            "잠든 시각 위치": (
+                (started - midnight).total_seconds() / 3600
+            ),
+            "일어난 시각 위치": (
+                (ended - midnight).total_seconds() / 3600
+            ),
+            "잠든 날짜·시간": started.strftime(
+                "%Y-%m-%d %H:%M"
+            ),
+            "일어난 날짜·시간": ended.strftime(
+                "%Y-%m-%d %H:%M"
+            ),
+            "총 수면 시간": format_minutes(duration),
+        })
+
+    max_hour = max(
+        item["일어난 시각 위치"] for item in chart_rows
+    )
+
+    tick_step = (
+        6 if max_hour <= 48
+        else max(24, math.ceil(max_hour / 8 / 24) * 24)
+    )
+    axis_end = max(
+        24, math.ceil(max_hour / tick_step) * tick_step
+    )
+
+    label_expression = (
+        "(floor(datum.value / 24) === 0 ? '' : "
+        "floor(datum.value / 24) === 1 ? '다음 날 ' : "
+        "'+' + floor(datum.value / 24) + '일 ') + "
+        "format(datum.value % 24, '02d') + ':00'"
+    )
+
+    st.caption(
+        "보라색 막대 하나가 수면 기록 한 건이에요. "
+        "왼쪽은 잠든 시각, 오른쪽은 일어난 시각이며, "
+        "같은 날 여러 번 잔 기록도 각각 표시해요."
+    )
+
+    st.vega_lite_chart(
+        pd.DataFrame(chart_rows),
+        {
+            "height": {"step": 30},
+            "mark": {
+                "type": "bar",
+                "color": "#9580D8",
+                "cornerRadius": 6,
+                "size": 17,
+            },
+            "encoding": {
+                "y": {
+                    "field": "수면 기록",
+                    "type": "ordinal",
+                    "sort": labels,
+                    "axis": {
+                        "title": "잠든 날짜 · 기록 번호",
+                        "labelFontSize": 12,
+                    },
+                },
+                "x": {
+                    "field": "잠든 시각 위치",
+                    "type": "quantitative",
+                    "scale": {
+                        "domain": [0, axis_end],
+                        "nice": False,
+                    },
+                    "axis": {
+                        "title": "잠든 날짜의 00:00 기준",
+                        "values": list(
+                            range(0, axis_end + 1, tick_step)
+                        ),
+                        "labelExpr": label_expression,
+                        "labelOverlap": True,
+                    },
+                },
+                "x2": {
+                    "field": "일어난 시각 위치",
+                },
+                "tooltip": [
+                    {
+                        "field": "잠든 날짜·시간",
+                        "type": "nominal",
+                    },
+                    {
+                        "field": "일어난 날짜·시간",
+                        "type": "nominal",
+                    },
+                    {
+                        "field": "총 수면 시간",
+                        "type": "nominal",
+                    },
+                ],
+            },
+            "config": {"view": {"stroke": None}},
+        },
+        use_container_width=True,
+    )
+
+    st.caption(
+        f"선택한 월의 수면 {len(month_sleeps)}건 중 "
+        f"{offset + 1}~{offset + len(visible)}번 표시 · "
+        "잠든 날짜가 조회 기간에 포함된 기록 기준이에요."
+    )
+    st.caption(
+        "가로축의 ‘다음 날’은 각 기록에서 잠든 날짜의 "
+        "다음 날을 뜻해요. "
+        "예를 들어 23:00부터 다음 날 07:00까지의 수면은 "
+        "자정을 지나 이어지는 막대로 표시해요. "
+        "정확한 날짜·시간과 총 수면 시간은 막대에 커서를 "
+        "올려 확인해 주세요."
     )
     st.divider()
 
@@ -770,7 +952,9 @@ def build_edit_values(kind, form, now):
             raise ValueError("활동명을 입력해 주세요.")
 
         if not 1 <= duration <= 1440 or intensity not in INTENSITIES:
-            raise ValueError("활동 시간과 강도를 확인해 주세요.")
+            raise ValueError(
+                "활동 시간과 강도를 확인해 주세요."
+            )
 
         ended = started + timedelta(minutes=duration)
 
@@ -840,8 +1024,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
     )
     latest_day = (
         now.date() - timedelta(days=1)
-        if kind == "no_activity"
-        else now.date()
+        if kind == "no_activity" else now.date()
     )
 
     st.markdown("### ✏️ 선택한 기록 수정")
@@ -868,8 +1051,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
     with st.form(prefix):
         form["date"] = st.date_input(
             "잠든 날짜 수정"
-            if kind == "sleep"
-            else "기록 날짜 수정",
+            if kind == "sleep" else "기록 날짜 수정",
             value=original_day,
             max_value=max(original_day, latest_day),
         )
@@ -877,8 +1059,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
         if kind != "no_activity":
             form["time"] = st.time_input(
                 "잠든 시간 수정"
-                if kind == "sleep"
-                else "시작·섭취 시간 수정",
+                if kind == "sleep" else "시작·섭취 시간 수정",
                 value=original_clock,
                 step=60,
             )
@@ -893,9 +1074,10 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             form["meal_slot"] = st.selectbox(
                 "식사 구분 수정",
                 MEAL_SLOTS,
-                index=MEAL_SLOTS.index(slot)
-                if slot in MEAL_SLOTS
-                else 4,
+                index=(
+                    MEAL_SLOTS.index(slot)
+                    if slot in MEAL_SLOTS else 4
+                ),
             )
 
             form["amount"] = st.number_input(
@@ -939,9 +1121,10 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             form["intensity"] = st.selectbox(
                 "활동 강도 수정",
                 INTENSITIES,
-                index=INTENSITIES.index(intensity)
-                if intensity in INTENSITIES
-                else 1,
+                index=(
+                    INTENSITIES.index(intensity)
+                    if intensity in INTENSITIES else 1
+                ),
             )
 
         elif kind == "sleep":
@@ -984,11 +1167,8 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
         values = build_edit_values(kind, form, get_local_now())
 
         check_activity_conflict(
-            client,
-            user_id,
-            profile_id,
-            values["record_date"],
-            kind,
+            client, user_id, profile_id,
+            values["record_date"], kind,
         )
 
         result = (
@@ -1030,8 +1210,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             f"record_ai_result_{scope}", None
         )
         st.session_state.lifestyle_notice = (
-            user_id,
-            profile_id,
+            user_id, profile_id,
             "선택한 기록을 수정했어요.",
         )
         st.rerun()
@@ -1238,8 +1417,7 @@ with st.form(form_key):
     )
     latest_date = (
         today - timedelta(days=1)
-        if record_type == "no_activity"
-        else today
+        if record_type == "no_activity" else today
     )
 
     record_date = st.date_input(
@@ -1253,8 +1431,7 @@ with st.form(form_key):
     if record_type != "no_activity":
         record_time = st.time_input(
             "잠든 시간"
-            if record_type == "sleep"
-            else "시작·섭취 시간",
+            if record_type == "sleep" else "시작·섭취 시간",
             value=time(23, 0) if record_type == "sleep" else clock,
             step=60,
         )
@@ -1308,8 +1485,7 @@ with st.form(form_key):
             step=1,
         )
         intensity = st.selectbox(
-            "느낀 활동 강도",
-            INTENSITIES,
+            "느낀 활동 강도", INTENSITIES
         )
 
     elif record_type == "sleep":
@@ -1351,8 +1527,7 @@ if submitted:
             "record_date": record_date.isoformat(),
             "record_time": (
                 record_time.strftime("%H:%M")
-                if record_time is not None
-                else None
+                if record_time is not None else None
             ),
             "memo": memo.strip(),
         }
@@ -1390,8 +1565,7 @@ if submitted:
         elif record_type == "activity":
             name = (
                 custom_activity.strip()
-                if activity_name == "기타"
-                else activity_name
+                if activity_name == "기타" else activity_name
             )
 
             if not name:
@@ -1415,18 +1589,18 @@ if submitted:
                     "자정을 넘긴 활동은 날짜별로 나눠 기록해 주세요."
                 )
 
-            payload = [
-                {
-                    **values,
-                    "item_name": name,
-                    "duration_minutes": int(duration),
-                    "intensity": intensity,
-                }
-            ]
+            payload = [{
+                **values,
+                "item_name": name,
+                "duration_minutes": int(duration),
+                "intensity": intensity,
+            }]
 
         elif record_type == "sleep":
             ended = datetime.combine(wake_date, wake_time)
-            minutes = int((ended - started).total_seconds() // 60)
+            minutes = int(
+                (ended - started).total_seconds() // 60
+            )
 
             if minutes <= 0:
                 raise ValueError(
@@ -1438,36 +1612,31 @@ if submitted:
                     "일어난 시각이 현재보다 늦게 입력되어 있어요."
                 )
 
-            payload = [
-                {
-                    **values,
-                    "item_name": "수면",
-                    "duration_minutes": minutes,
-                }
-            ]
+            payload = [{
+                **values,
+                "item_name": "수면",
+                "duration_minutes": minutes,
+            }]
 
         else:
             if not confirmed:
-                raise ValueError("활동 없음 확인란을 체크해 주세요.")
+                raise ValueError(
+                    "활동 없음 확인란을 체크해 주세요."
+                )
 
             if record_date >= today:
                 raise ValueError(
                     "활동 없음은 하루가 끝난 날짜에만 기록해 주세요."
                 )
 
-            payload = [
-                {
-                    **values,
-                    "item_name": "활동 없음 확인",
-                }
-            ]
+            payload = [{
+                **values,
+                "item_name": "활동 없음 확인",
+            }]
 
         check_activity_conflict(
-            client,
-            user.id,
-            profile_id,
-            record_date.isoformat(),
-            record_type,
+            client, user.id, profile_id,
+            record_date.isoformat(), record_type,
         )
 
         (
@@ -1495,8 +1664,7 @@ if submitted:
     else:
         st.session_state[revision_key] = revision + 1
         st.session_state.lifestyle_notice = (
-            user.id,
-            profile_id,
+            user.id, profile_id,
             f"{len(payload)}건의 기록을 저장했어요.",
         )
         st.rerun()
@@ -1536,8 +1704,7 @@ try:
 
     if kind_filter != "전체":
         filter_code = next(
-            code
-            for code, label in TYPE_LABELS.items()
+            code for code, label in TYPE_LABELS.items()
             if label == kind_filter
         )
         query = query.eq("record_type", filter_code)
@@ -1569,6 +1736,9 @@ if kind_filter in ["전체", "식사"]:
 
 if kind_filter in ["전체", "운동·산책", "활동 없음"]:
     show_activity_chart(rows, start, end, ui_scope)
+
+if kind_filter in ["전체", "수면"]:
+    show_sleep_chart(rows, start, end, ui_scope)
 
 st.markdown("### 📋 상세 기록 확인·수정")
 st.caption(
@@ -1635,7 +1805,6 @@ if positions and 0 <= positions[0] < len(rows):
     if delete_clicked:
         if not confirm_delete:
             st.warning("삭제 확인란을 먼저 체크해 주세요.")
-
         else:
             try:
                 result = (
@@ -1657,8 +1826,7 @@ if positions and 0 <= positions[0] < len(rows):
             else:
                 if result.data:
                     st.session_state.lifestyle_notice = (
-                        user.id,
-                        profile_id,
+                        user.id, profile_id,
                         "선택한 기록을 삭제했어요.",
                     )
                     st.rerun()
