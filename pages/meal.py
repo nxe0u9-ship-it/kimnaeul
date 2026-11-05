@@ -41,13 +41,10 @@ def show_error(message, error):
 def parse_expiry(value):
     if value is None or value == "" or pd.isna(value):
         return None
-
     if isinstance(value, datetime):
         return value.date()
-
     if isinstance(value, date):
         return value
-
     return date.fromisoformat(str(value).strip())
 
 
@@ -106,27 +103,21 @@ def clean_ingredients(rows):
             continue
 
         if not name:
-            raise ValueError(
-                f"{index}행의 재료명을 입력해 주세요."
-            )
+            raise ValueError("재료명을 입력해 주세요.")
 
         if amount is not None and (
             not math.isfinite(amount) or amount <= 0
         ):
             raise ValueError(
-                f"{index}행의 보유량은 "
-                "0보다 큰 숫자로 입력해 주세요."
+                "보유량은 0보다 큰 숫자로 입력해 주세요."
             )
 
         if amount is not None and unit not in UNITS:
-            raise ValueError(
-                f"{index}행의 단위를 선택해 주세요."
-            )
+            raise ValueError("보유량 단위를 선택해 주세요.")
 
         if name.casefold() in seen:
             raise ValueError(
-                f"‘{name}’이 중복되어 있어요. "
-                "한 행으로 합쳐 주세요."
+                f"‘{name}’이 중복되어 있어요."
             )
 
         seen.add(name.casefold())
@@ -155,6 +146,76 @@ def read_fridge(client, user_id, fridge_id):
     ) or []
 
     return rows[0] if rows else None
+
+
+def make_ingredient(
+    name, has_amount, amount, unit, has_expiry, expiry_date
+):
+    name = name.strip()
+
+    if not name:
+        raise ValueError("재료명을 입력해 주세요.")
+
+    values = clean_ingredients([{
+        "재료명": name,
+        "보유량": float(amount) if has_amount else None,
+        "단위": unit if has_amount else "",
+        "유통·소비기한": expiry_date if has_expiry else None,
+    }])
+
+    return values[0]
+
+
+def check_ingredient_name(items, name, skip_index=None):
+    normalized = name.strip().casefold()
+
+    for index, item in enumerate(items):
+        existing_name = str(
+            item.get("name") or ""
+        ).strip().casefold()
+
+        if index != skip_index and existing_name == normalized:
+            raise ValueError(
+                f"‘{name}’이 이미 있어요. "
+                "기존 재료를 선택해 수정해 주세요."
+            )
+
+
+def update_fridge_ingredients(
+    client, user_id, fridge_id, expected_revision, ingredients
+):
+    current = read_fridge(client, user_id, fridge_id)
+
+    if (
+        current is None
+        or fingerprint(current) != expected_revision
+    ):
+        raise ValueError(
+            "냉장고 내용이 바뀌었어요. "
+            "위의 새로 불러오기 버튼을 누른 뒤 "
+            "다시 수정해 주세요."
+        )
+
+    result = (
+        client.table("family_refrigerators")
+        .update(
+            {"ingredients": ingredients},
+            returning="representation",
+        )
+        .eq("user_id", user_id)
+        .eq("id", fridge_id)
+        .execute()
+    )
+
+    if (
+        not result.data
+        or result.data[0].get("ingredients") != ingredients
+    ):
+        raise ValueError(
+            "저장 결과를 확인하지 못했어요. "
+            "위의 새로 불러오기 버튼을 눌러 "
+            "저장된 내용을 확인해 주세요."
+        )
 
 
 def show_fridge_picker(client, user_id):
@@ -528,142 +589,292 @@ st.caption(
     "재료 저장·삭제·초기화는 위에서 선택한 냉장고에만 적용돼요. "
     "식사 조건의 관리 대상은 왼쪽 사이드바에서 선택해 주세요."
 )
-
-ingredient_rows = [
-    {
-        "재료명": item.get("name") or "",
-        "보유량": item.get("amount"),
-        "단위": item.get("unit") or None,
-        "유통·소비기한": expiry_for_editor(item),
-    }
-    for item in saved_ingredients
-]
-
-if not ingredient_rows:
-    ingredient_rows = [{
-        "재료명": "",
-        "보유량": None,
-        "단위": "g",
-        "유통·소비기한": None,
-    }]
-
-ingredient_df = pd.DataFrame(
-    ingredient_rows,
-    columns=["재료명", "보유량", "단위", "유통·소비기한"],
+st.caption(
+    "재료를 추가하려면 ‘새 재료 추가’를, 저장된 재료를 "
+    "바꾸거나 삭제하려면 ‘저장된 재료 수정·삭제’를 사용해 주세요. "
+    "아래 ‘현재 저장된 내용’ 표는 조회용이에요."
 )
 
-ingredient_df["재료명"] = ingredient_df["재료명"].astype(
-    "string"
-)
-ingredient_df["보유량"] = pd.to_numeric(
-    ingredient_df["보유량"],
-    errors="coerce",
-).astype(float)
-
-ingredient_df["단위"] = ingredient_df["단위"].astype(
-    "string"
-)
-ingredient_df["유통·소비기한"] = pd.to_datetime(
-    ingredient_df["유통·소비기한"],
-    errors="coerce",
-).dt.date
-
-with st.form(
-    f"family_fridge_form_{user.id}_{fridge_revision}"
+with st.expander(
+    "➕ 새 재료 추가",
+    expanded=not saved_ingredients,
 ):
-    st.caption(
-        "표의 칸을 눌러 입력해요. 맨 아래 빈 행에서 추가하고, "
-        "왼쪽 행 선택란을 눌러 삭제할 수 있어요."
-    )
-
-    edited_ingredients = st.data_editor(
-        ingredient_df,
-        hide_index=True,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "재료명": st.column_config.TextColumn(
-                "재료명",
-                help="예: 달걀, 두부, 양배추",
-                max_chars=80,
-            ),
-            "보유량": st.column_config.NumberColumn(
-                "보유량",
-                help="양을 모르면 비워 두세요.",
-                min_value=0.0,
-                step=0.5,
-            ),
-            "단위": st.column_config.SelectboxColumn(
-                "단위",
-                options=UNITS,
-                default="g",
-            ),
-            "유통·소비기한": st.column_config.DateColumn(
-                "유통·소비기한",
-                format="YYYY-MM-DD",
-                help=(
-                    "포장에 적힌 유통기한 또는 소비기한을 "
-                    "입력해요. 모르면 비워 두세요."
-                ),
-                required=False,
-            ),
-        },
-        key=f"family_fridge_editor_{user.id}_{fridge_revision}",
-    )
-
-    st.caption(
-        "보유량과 기한은 선택 사항이에요. "
-        "양을 입력할 때는 단위도 선택해 주세요. "
-        "날짜 칸을 눌러 기한을 선택하거나 지울 수 있어요."
-    )
-
-    save_fridge_clicked = st.form_submit_button(
-        "💾 선택한 냉장고 재료 저장",
-        use_container_width=True,
-    )
-
-if save_fridge_clicked:
-    try:
-        clean_df = edited_ingredients.astype(object).where(
-            pd.notna(edited_ingredients), None
+    with st.form(
+        f"ingredient_add_{user.id}_{fridge_revision}"
+    ):
+        add_name = st.text_input(
+            "추가할 재료명",
+            max_chars=80,
+            placeholder="예: 달걀, 두부, 양배추",
         )
 
-        ingredients = clean_ingredients(
-            clean_df.to_dict("records")
+        add_has_amount = st.checkbox(
+            "보유량을 입력할게요."
         )
 
-        result = (
-            client.table("family_refrigerators")
-            .update(
-                {"ingredients": ingredients},
-                returning="representation",
-            )
-            .eq("user_id", user.id)
-            .eq("id", fridge_id)
-            .execute()
+        add_c1, add_c2 = st.columns(2)
+        add_amount = add_c1.number_input(
+            "추가할 보유량",
+            min_value=0.0,
+            value=0.0,
+            step=0.5,
+        )
+        add_unit = add_c2.selectbox(
+            "보유량 단위", UNITS
         )
 
-        if not result.data:
-            raise ValueError(
-                "저장된 선택한 냉장고를 확인하지 못했어요."
+        add_has_expiry = st.checkbox(
+            "유통·소비기한을 입력할게요."
+        )
+        add_expiry = st.date_input(
+            "추가할 재료의 유통·소비기한",
+            value=today,
+        )
+
+        st.caption(
+            "보유량이나 유통·소비기한을 모르면 해당 확인란을 "
+            "체크하지 마세요. 확인란이 체크된 항목만 저장돼요."
+        )
+
+        add_clicked = st.form_submit_button(
+            "➕ 선택한 냉장고에 재료 추가",
+            use_container_width=True,
+        )
+
+    if add_clicked:
+        try:
+            new_item = make_ingredient(
+                add_name,
+                add_has_amount,
+                add_amount,
+                add_unit,
+                add_has_expiry,
+                add_expiry,
             )
 
-    except ValueError as error:
-        st.warning(str(error))
+            check_ingredient_name(
+                saved_ingredients,
+                new_item["name"],
+            )
 
-    except Exception as error:
-        show_error(
-            "저장 결과를 확인하지 못했어요. "
-            "페이지를 다시 열어 확인해 주세요.",
-            error,
+            update_fridge_ingredients(
+                client,
+                user.id,
+                fridge_id,
+                fridge_revision,
+                saved_ingredients + [new_item],
+            )
+
+        except ValueError as error:
+            st.warning(str(error))
+
+        except Exception as error:
+            show_error(
+                "재료 추가 결과를 확인하지 못했어요. "
+                "위의 새로 불러오기 버튼으로 저장 내용을 확인해 주세요.",
+                error,
+            )
+
+        else:
+            st.session_state[f"meal_notice_{user.id}"] = (
+                f"‘{fridge_name}’에 "
+                f"‘{new_item['name']}’을 추가했어요."
+            )
+            st.rerun()
+
+st.markdown("### ✏️ 저장된 재료 수정·삭제")
+
+if not saved_ingredients:
+    st.info(
+        "저장된 재료가 없어요. "
+        "위의 ‘새 재료 추가’에서 먼저 재료를 등록해 주세요."
+    )
+
+else:
+    edit_index = st.selectbox(
+        "수정하거나 삭제할 재료를 선택해 주세요.",
+        options=list(range(len(saved_ingredients))),
+        format_func=lambda index: (
+            saved_ingredients[index].get("name")
+            or f"재료 {index + 1}"
+        ),
+        key=f"ingredient_edit_choice_{user.id}_{fridge_revision}",
+    )
+
+    editing = saved_ingredients[edit_index]
+    original_amount = editing.get("amount")
+    original_unit = editing.get("unit") or "g"
+
+    edit_units = (
+        UNITS if original_unit in UNITS
+        else UNITS + [original_unit]
+    )
+
+    original_expiry = expiry_for_editor(editing)
+    _, edit_expiry_status, _ = expiry_info(editing, today)
+
+    if original_expiry is not None and original_expiry < today:
+        st.error(
+            "유통기한이 지났어요. "
+            f"입력한 기한: {original_expiry:%Y-%m-%d}"
         )
 
-    else:
-        st.session_state[f"meal_notice_{user.id}"] = (
-            "선택한 냉장고 재료를 저장했어요. "
-            f"‘{fridge_name}’에 적용돼요."
+    st.caption(
+        f"현재 선택한 재료: "
+        f"{editing.get('name') or '이름 없음'} · "
+        f"{edit_expiry_status}"
+    )
+
+    with st.form(
+        f"ingredient_edit_{user.id}_{fridge_revision}_{edit_index}"
+    ):
+        edit_name = st.text_input(
+            "변경할 재료명",
+            value=editing.get("name") or "",
+            max_chars=80,
         )
-        st.rerun()
+
+        edit_has_amount = st.checkbox(
+            "보유량을 저장할게요.",
+            value=original_amount is not None,
+        )
+
+        edit_c1, edit_c2 = st.columns(2)
+
+        edit_amount = edit_c1.number_input(
+            "변경할 보유량",
+            min_value=0.0,
+            value=max(0.0, float(original_amount or 0)),
+            step=0.5,
+        )
+
+        edit_unit = edit_c2.selectbox(
+            "변경할 단위",
+            edit_units,
+            index=edit_units.index(original_unit),
+        )
+
+        edit_has_expiry = st.checkbox(
+            "유통·소비기한을 저장할게요.",
+            value=original_expiry is not None,
+        )
+
+        edit_expiry = st.date_input(
+            "변경할 유통·소비기한",
+            value=original_expiry or today,
+        )
+
+        st.caption(
+            "보유량 확인란을 해제하면 기존 보유량·단위를 지워요. "
+            "기한 확인란을 해제하면 기존 유통·소비기한을 지워요. "
+            "변경한 내용은 아래 ‘재료 수정 저장’을 눌러야 반영돼요."
+        )
+
+        edit_clicked = st.form_submit_button(
+            "💾 재료 수정 저장",
+            use_container_width=True,
+        )
+
+        st.markdown("**🗑️ 선택한 재료 삭제**")
+
+        confirm_ingredient_delete = st.checkbox(
+            "위에서 선택한 재료를 삭제할게요. "
+            "삭제한 재료는 앱에서 복구할 수 없어요."
+        )
+
+        delete_ingredient_clicked = st.form_submit_button(
+            "🗑️ 선택한 재료 삭제",
+            use_container_width=True,
+        )
+
+    if edit_clicked:
+        try:
+            updated_item = make_ingredient(
+                edit_name,
+                edit_has_amount,
+                edit_amount,
+                edit_unit,
+                edit_has_expiry,
+                edit_expiry,
+            )
+
+            check_ingredient_name(
+                saved_ingredients,
+                updated_item["name"],
+                skip_index=edit_index,
+            )
+
+            updated_ingredients = [
+                updated_item if index == edit_index else item
+                for index, item in enumerate(saved_ingredients)
+            ]
+
+            if updated_ingredients == saved_ingredients:
+                st.info("변경된 내용이 없어요.")
+
+            else:
+                update_fridge_ingredients(
+                    client,
+                    user.id,
+                    fridge_id,
+                    fridge_revision,
+                    updated_ingredients,
+                )
+
+                st.session_state[f"meal_notice_{user.id}"] = (
+                    f"‘{fridge_name}’의 "
+                    f"‘{updated_item['name']}’ 재료 정보를 수정했어요."
+                )
+                st.rerun()
+
+        except ValueError as error:
+            st.warning(str(error))
+
+        except Exception as error:
+            show_error(
+                "재료 수정 결과를 확인하지 못했어요. "
+                "위의 새로 불러오기 버튼으로 저장 내용을 확인해 주세요.",
+                error,
+            )
+
+    if delete_ingredient_clicked:
+        if not confirm_ingredient_delete:
+            st.warning(
+                "선택한 재료의 삭제 확인란을 먼저 체크해 주세요."
+            )
+
+        else:
+            try:
+                remaining_items = [
+                    item
+                    for index, item in enumerate(saved_ingredients)
+                    if index != edit_index
+                ]
+
+                update_fridge_ingredients(
+                    client,
+                    user.id,
+                    fridge_id,
+                    fridge_revision,
+                    remaining_items,
+                )
+
+            except ValueError as error:
+                st.warning(str(error))
+
+            except Exception as error:
+                show_error(
+                    "재료 삭제 결과를 확인하지 못했어요. "
+                    "위의 새로 불러오기 버튼으로 저장 내용을 확인해 주세요.",
+                    error,
+                )
+
+            else:
+                st.session_state[f"meal_notice_{user.id}"] = (
+                    f"‘{fridge_name}’에서 "
+                    f"‘{editing.get('name')}’ 재료를 삭제했어요."
+                )
+                st.rerun()
 
 st.subheader(f"⚙️ {profile['name']}의 식사 조건")
 st.caption(
@@ -696,6 +907,7 @@ with st.form(
         ),
         max_chars=1000,
     )
+
     st.caption(
         "알레르기는 현재 보관용이며 AI 메뉴 추천에 "
         "전송되거나 자동 반영되지 않아요."
@@ -720,6 +932,7 @@ with st.form(
         placeholder="안내받은 내용이 있으면 입력해 주세요.",
         max_chars=3000,
     )
+
     st.caption(
         "이 지침은 현재 보관용이며 AI 메뉴 추천에 "
         "전송되거나 자동 반영되지 않아요."
@@ -868,10 +1081,13 @@ if saved_ingredients:
     )
 
     st.caption(
+        "이 표는 현재 저장된 내용을 보여주는 조회용 표예요. "
+        "재료 수정·삭제는 위의 ‘저장된 재료 수정·삭제’에서 해 주세요."
+    )
+    st.caption(
         "입력한 유통·소비기한이 오늘보다 이전이면 "
-        "지난 재료로 표시해요. "
-        "기한이 지난 재료는 자동 삭제하지 않아요. "
-        "아래에서 선택해 삭제할 수 있어요."
+        "지난 재료로 표시해요. 기한이 지난 재료도 "
+        "자동 삭제하지 않으며 아래에서 선택해 삭제할 수 있어요."
     )
 
 else:
@@ -931,20 +1147,6 @@ with st.expander(
 
             else:
                 try:
-                    current = read_fridge(
-                        client, user.id, fridge_id
-                    )
-
-                    if (
-                        current is None
-                        or fingerprint(current) != fridge_revision
-                    ):
-                        raise ValueError(
-                            "냉장고 내용이 바뀌었어요. "
-                            "위의 새로 불러오기 버튼을 누른 뒤 "
-                            "다시 선택해 주세요."
-                        )
-
                     delete_day = get_local_now().date()
                     selected_set = set(selected_expired)
 
@@ -969,22 +1171,13 @@ with st.expander(
                         if index not in selected_set
                     ]
 
-                    result = (
-                        client.table("family_refrigerators")
-                        .update(
-                            {"ingredients": remaining},
-                            returning="representation",
-                        )
-                        .eq("user_id", user.id)
-                        .eq("id", fridge_id)
-                        .execute()
+                    update_fridge_ingredients(
+                        client,
+                        user.id,
+                        fridge_id,
+                        fridge_revision,
+                        remaining,
                     )
-
-                    if not result.data:
-                        raise ValueError(
-                            "삭제 결과를 확인하지 못했어요. "
-                            "목록을 다시 불러와 확인해 주세요."
-                        )
 
                 except ValueError as error:
                     st.warning(str(error))
@@ -1115,23 +1308,13 @@ with st.expander("🗑️ 선택한 냉장고·식사 조건 초기화"):
 
             try:
                 if reset_type in ["ingredients", "all"]:
-                    result = (
-                        client.table("family_refrigerators")
-                        .update(
-                            {"ingredients": []},
-                            returning="representation",
-                        )
-                        .eq("user_id", user.id)
-                        .eq("id", fridge_id)
-                        .execute()
+                    update_fridge_ingredients(
+                        client,
+                        user.id,
+                        fridge_id,
+                        fridge_revision,
+                        [],
                     )
-
-                    if not result.data:
-                        raise ValueError(
-                            "선택한 냉장고 초기화 결과를 "
-                            "확인하지 못했어요."
-                        )
-
                     completed.append(
                         f"‘{fridge_name}’의 재료"
                     )
