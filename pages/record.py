@@ -238,11 +238,6 @@ notice_key = f"glucose_notice_{scope}"
 revision_key = f"glucose_revision_{scope}"
 revision = st.session_state.get(revision_key, 0)
 
-notice = st.session_state.pop(notice_key, None)
-
-if notice:
-    st.success(notice)
-
 profile_notice_key = f"profile_edit_notice_{scope}"
 profile_notice = st.session_state.pop(
     profile_notice_key, None
@@ -507,6 +502,11 @@ with st.form(form_key):
         "💾 혈당 기록 저장",
         use_container_width=True,
     )
+
+    notice = st.session_state.pop(notice_key, None)
+
+    if notice:
+        st.success(notice)
 
 if saved:
     measured_at = datetime.combine(
