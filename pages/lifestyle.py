@@ -1605,7 +1605,7 @@ if submitted:
                 for name, amount, unit in foods
             ):
                 raise ValueError(
-                    "모든 음식의 이름과 0보다 큰 섭취량을 입력해 주세요."
+                    "0보다 큰 섭취량을 입력해 주세요."
                 )
 
             payload = [
