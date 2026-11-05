@@ -126,6 +126,147 @@ def display_records(rows):
     return pd.DataFrame(result)
 
 
+def format_minutes(minutes):
+    minutes = int(minutes)
+    hours, remaining = divmod(minutes, 60)
+
+    if hours and remaining:
+        return f"{hours}시간 {remaining}분"
+
+    if hours:
+        return f"{hours}시간"
+
+    return f"{remaining}분"
+
+
+def show_record_summary(rows, start, end, kind_filter):
+    st.markdown("### 📊 선택한 기간의 기록 요약")
+    st.caption(
+        f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · "
+        "아래 표에 표시된 기록 기준이에요."
+    )
+
+    period_days = (end - start).days + 1
+
+    meal_days = {
+        row["record_date"]
+        for row in rows
+        if row["record_type"] == "meal"
+    }
+
+    activities = [
+        row for row in rows
+        if row["record_type"] == "activity"
+    ]
+
+    sleeps = [
+        row for row in rows
+        if row["record_type"] == "sleep"
+        and row.get("duration_minutes") is not None
+        and float(row["duration_minutes"]) > 0
+    ]
+
+    confirmed_days = {
+        row["record_date"]
+        for row in rows
+        if row["record_type"] == "no_activity"
+    }
+
+    metrics = []
+
+    if kind_filter in ["전체", "식사"]:
+        metrics.append(
+            (
+                "🍽️ 식사 기록일",
+                f"{len(meal_days)}일 / {period_days}일",
+                "음식을 여러 개 입력한 날도 하루로 계산해요. "
+                "식사 횟수나 섭취량의 합계는 아니에요.",
+            )
+        )
+
+    if kind_filter in ["전체", "운동·산책"]:
+        activity_minutes = sum(
+            int(row.get("duration_minutes") or 0)
+            for row in activities
+        )
+
+        activity_value = (
+            format_minutes(activity_minutes)
+            if activities
+            else "기록 없음"
+        )
+
+        metrics.append(
+            (
+                "🏃 총 활동 시간",
+                activity_value,
+                "저장된 운동·산책 시간의 합계예요. "
+                "같은 시간대에 중복 저장한 기록도 각각 포함돼요.",
+            )
+        )
+
+    if kind_filter in ["전체", "수면"]:
+        if sleeps:
+            average = int(
+                sum(int(row["duration_minutes"]) for row in sleeps)
+                / len(sleeps)
+                + 0.5
+            )
+            sleep_value = format_minutes(average)
+        else:
+            sleep_value = "기록 없음"
+
+        metrics.append(
+            (
+                "😴 기록당 평균 수면",
+                sleep_value,
+                "잠든 날짜가 조회 기간에 포함된 수면 기록의 평균이에요. "
+                "여러 번 나눠 잔 경우 각 기록을 따로 계산하며, "
+                "분 단위로 반올림해요.",
+            )
+        )
+
+    if kind_filter == "활동 없음":
+        metrics.append(
+            (
+                "📅 활동 없음 확인일",
+                f"{len(confirmed_days)}일 / {period_days}일",
+                "직접 ‘활동 없음’을 확인해 저장한 날짜 수예요.",
+            )
+        )
+
+    columns = st.columns(len(metrics))
+
+    for column, (label, value, help_text) in zip(columns, metrics):
+        with column:
+            with st.container(border=True):
+                st.metric(label, value, help=help_text)
+
+    if kind_filter in ["전체", "운동·산책"]:
+        st.caption(
+            f"운동·산책 기록 {len(activities)}건 · "
+            f"활동 없음 확인 {len(confirmed_days)}일"
+        )
+
+    if kind_filter in ["전체", "수면"]:
+        st.caption(
+            f"평균 수면 계산에 포함한 수면 기록: {len(sleeps)}건"
+        )
+
+    if len(rows) >= 1000:
+        st.warning(
+            "조회 결과가 최대 표시 건수인 1,000건에 도달했어요. "
+            "요약도 표시된 기록만 계산해요. "
+            "기간 전체를 확인하려면 조회 기간을 줄여 주세요."
+        )
+
+    st.caption(
+        "기록이 없는 날짜를 식사·활동·수면이 없었던 날로 "
+        "계산하지 않아요."
+    )
+    st.divider()
+
+
 def build_edit_values(kind, form, now):
     now = now.replace(tzinfo=None)
     day = form["date"]
@@ -1003,6 +1144,9 @@ if not rows:
     )
     st.stop()
 
+show_record_summary(rows, start, end, kind_filter)
+
+st.markdown("### 📋 상세 기록 확인·수정")
 st.caption(
     f"최신 기록 {len(rows)}건 표시 · 최대 1,000건. "
     "식사는 음식 한 종류당 한 행으로 표시해요. "
