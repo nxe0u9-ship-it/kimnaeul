@@ -5,6 +5,7 @@ import math
 import time
 
 import streamlit as st
+
 from openai import (
     OpenAI,
     APIConnectionError,
@@ -13,6 +14,7 @@ from openai import (
     AuthenticationError,
     RateLimitError,
 )
+
 from pydantic import BaseModel
 
 from app_shared import get_local_now, get_timezone_name
@@ -20,7 +22,9 @@ from app_shared import get_local_now, get_timezone_name
 
 MODEL = "gemini-3.5-flash-lite"
 
-BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+BASE_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 
 MEAL_SECTIONS = [
     ("breakfast", "🌅 아침"),
@@ -34,7 +38,6 @@ DOG_SECTIONS = [
     ("dinner", "🐾 후보 3"),
 ]
 
-# 이름이 정확히 일치하는 단일 식재료만 전달해요.
 # 개별 강아지의 섭취 안전성을 보장하는 목록은 아니에요.
 DOG_INGREDIENT_NAMES = {
     "닭가슴살",
@@ -167,7 +170,6 @@ def ingredient_is_current(item, today):
     except (ValueError, TypeError):
         return False
 
-    # 오늘까지인 재료는 포함해요.
     return expiry >= today
 
 
@@ -205,7 +207,6 @@ def build_request(
                 "저장된 재료 형식을 확인해 줘."
             )
 
-        # 호출하는 페이지와 별개로 여기서도 기한을 확인해요.
         if not ingredient_is_current(item, today):
             continue
 
@@ -251,9 +252,7 @@ def build_request(
             "냉장고의 재료와 기한을 확인해 줘."
         )
 
-    servings = int(
-        settings.get("servings", 1)
-    )
+    servings = int(settings.get("servings", 1))
 
     cooking_minutes = int(
         settings.get("max_cooking_minutes", 30)
@@ -305,8 +304,7 @@ def build_request(
             "max_cooking_minutes": cooking_minutes,
         }
 
-    # 이름, 계정 ID, 혈당, 실제 식사 기록,
-    # 알레르기 및 의료진 지침은 요청에 포함하지 않아요.
+    # 냉장고 ID·계정 ID·이름·건강기록 등은 포함하지 않아요.
     return {
         "target": "person",
         "ingredients": cleaned,
@@ -362,9 +360,7 @@ def validate_plan(
             )
 
         if not (
-            1
-            <= meal.cooking_minutes
-            <= max_cooking_minutes
+            1 <= meal.cooking_minutes <= max_cooking_minutes
         ):
             raise ValueError(
                 "추천 조리 시간이 설정한 조건과 맞지 않아. "
@@ -579,6 +575,7 @@ def show_meal_recommendations(
     profile_id,
     settings,
     profile=None,
+    fridge_id=None,
 ):
     st.divider()
 
@@ -591,6 +588,22 @@ def show_meal_recommendations(
 
     is_dog = target == "dog"
 
+    # meal.py에서 선택한 냉장고 ID를 사용해요.
+    # 필요하면 호출할 때 fridge_id를 직접 전달할 수도 있어요.
+    fridge_id = str(
+        fridge_id
+        or st.session_state.get(
+            f"active_fridge_{user_id}"
+        )
+        or ""
+    )
+
+    if not fridge_id:
+        st.info(
+            "먼저 위에서 사용할 냉장고를 선택해 줘."
+        )
+        return
+
     st.subheader(
         "🐶 강아지 토핑·간식 후보"
         if is_dog
@@ -599,7 +612,7 @@ def show_meal_recommendations(
 
     if is_dog:
         st.info(
-            "공유 재료 중 지원하는 단일 재료로 "
+            "선택한 냉장고의 재료 중 지원하는 단일 재료로 "
             "토핑·간식 후보 세 가지를 제안해. "
             "강아지의 하루 주식이나 치료 식단을 "
             "만드는 기능은 아니야."
@@ -618,7 +631,7 @@ def show_meal_recommendations(
 
     else:
         st.info(
-            "저장된 공유 냉장고 재료·제외할 음식·"
+            "선택한 냉장고의 저장된 재료·제외할 음식·"
             "인분·조리 시간으로 "
             "일반적인 요리 메뉴를 추천해."
         )
@@ -626,12 +639,11 @@ def show_meal_recommendations(
     st.caption(
         "추천 버튼을 누르면 아래에 표시한 내용이 "
         "Google Gemini로 전송돼. "
-        "재료명과 제외할 음식에는 "
-        "음식 이름만 적어 줘."
+        "재료명과 제외할 음식에는 음식 이름만 적어 줘."
     )
 
     st.warning(
-        "이름·계정 ID·저장한 혈당·실제 식사 기록·"
+        "이름·계정 ID·냉장고 ID·저장한 혈당·실제 식사 기록·"
         "알레르기·의료진 또는 수의사 지침은 "
         "전송하거나 자동 반영하지 않아. "
         "개인별 치료 식단이나 "
@@ -749,20 +761,28 @@ def show_meal_recommendations(
 
     st.caption(
         "입력란을 바꿨다면 해당 영역의 "
-        "‘공유 냉장고 재료 저장’ 또는 "
+        "‘선택한 냉장고 재료 저장’ 또는 "
         "‘현재 대상의 식사 조건 저장’을 눌러 줘. "
         "추천에는 현재 저장된 내용이 사용돼."
     )
 
     scope = f"{user_id}_{profile_id}_{target}"
 
-    result_key = f"meal_ai_result_{scope}"
-    last_request_key = f"meal_ai_last_request_{scope}"
+    # 냉장고별 추천 결과를 별도로 보관해요.
+    result_key = (
+        f"meal_ai_result_{scope}_{fingerprint(fridge_id)}"
+    )
 
-    # 날짜·시간대는 기존 결과의 유효성 확인에만 사용해요.
-    # Gemini에 보내는 request_data에는 포함하지 않아요.
+    # 냉장고를 바꾸더라도 연속 요청 제한은 유지해요.
+    last_request_key = (
+        f"meal_ai_last_request_{scope}"
+    )
+
+    # 아래 정보는 앱 안에서 결과를 구분할 때만 사용해요.
+    # Gemini에는 request_data만 전송해요.
     request_version = fingerprint({
         "request_data": request_data,
+        "fridge_id": fridge_id,
         "local_date": local_today.isoformat(),
         "timezone": timezone_name,
     })
@@ -849,10 +869,8 @@ def show_meal_recommendations(
             except APIStatusError as error:
                 if error.status_code == 403:
                     st.error(
-                        "현재 프로젝트에서 요청이 "
-                        "허용되지 않았어. "
-                        "AI Studio의 접근 권한과 "
-                        "이용 상태를 확인해 줘."
+                        "현재 프로젝트에서 요청이 허용되지 않았어. "
+                        "AI Studio의 접근 권한과 이용 상태를 확인해 줘."
                     )
 
                 elif error.status_code == 404:
@@ -864,8 +882,7 @@ def show_meal_recommendations(
 
                 else:
                     st.warning(
-                        "Gemini가 추천 요청을 "
-                        "처리하지 못했어. "
+                        "Gemini가 추천 요청을 처리하지 못했어. "
                         "잠시 후 다시 시도해 줘."
                     )
 
@@ -882,9 +899,7 @@ def show_meal_recommendations(
                 st.session_state[result_key] = {
                     "request_version": request_version,
                     "target": target,
-                    "servings": request_data.get(
-                        "servings"
-                    ),
+                    "servings": request_data.get("servings"),
                     "created_at": (
                         get_local_now().strftime(
                             "%Y-%m-%d %H:%M"
@@ -914,7 +929,6 @@ def show_meal_recommendations(
             render_plan(result)
 
     st.caption(
-        "추천 결과는 현재 접속 세션에서만 보관해. "
-        "화면을 다시 그릴 때 "
-        "자동으로 API를 호출하지 않아."
+        "추천 결과는 현재 접속 세션에서 냉장고·관리 대상별로 보관해. "
+        "화면을 다시 그릴 때 자동으로 API를 호출하지 않아."
     )
