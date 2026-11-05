@@ -1145,8 +1145,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
     st.markdown("### ✏️ 선택한 기록 수정")
     st.caption(
         f"기록 종류: {TYPE_LABELS[kind]} · "
-        "종류는 유지하고 내용을 수정해요. "
-        "기존 혈당 기록과의 연결도 유지돼요."
+        "종류는 유지하고 내용을 수정해요."
     )
     st.caption(f"수정 날짜·시간 기준: {timezone_name}")
 
@@ -1385,7 +1384,9 @@ if not profiles:
     )
     st.stop()
 
-profile_map = {item["id"]: item for item in profiles}
+profile_map = {
+    item["id"]: item for item in profiles
+}
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
