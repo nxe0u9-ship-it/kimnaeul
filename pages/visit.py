@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from hashlib import sha256
 from uuid import uuid4
+from html import escape
+import calendar
 import json
 
 import pandas as pd
@@ -21,6 +23,309 @@ NOTE_MODES = (
 )
 
 
+# 진료 캘린더
+def shift_calendar_month(month, offset):
+    index = (
+        (month.year - 1) * 12
+        + month.month - 1
+        + offset
+    )
+
+    if not 0 <= index < 9999 * 12:
+        raise ValueError(
+            "표시할 수 있는 날짜 범위를 벗어났어요."
+        )
+
+    year_index, month_index = divmod(index, 12)
+
+    return date(
+        year_index + 1,
+        month_index + 1,
+        1,
+    )
+
+
+def calendar_html(notes, month, today):
+    by_day = {}
+
+    for note in notes:
+        raw = note.get("visit_date")
+
+        if not raw:
+            continue
+
+        try:
+            visit_day = date.fromisoformat(str(raw))
+
+        except (TypeError, ValueError):
+            continue
+
+        if (
+            visit_day.year,
+            visit_day.month,
+        ) == (
+            month.year,
+            month.month,
+        ):
+            by_day.setdefault(
+                visit_day.day,
+                [],
+            ).append(note)
+
+    parts = [
+        '<div class="visit-calendar-wrap">',
+        '<table class="visit-calendar">',
+        "<thead><tr>",
+    ]
+
+    for label in ["월", "화", "수", "목", "금", "토", "일"]:
+        parts.append(f"<th>{label}</th>")
+
+    parts.append("</tr></thead><tbody>")
+
+    weeks = calendar.Calendar(
+        firstweekday=0
+    ).monthdayscalendar(
+        month.year,
+        month.month,
+    )
+
+    for week in weeks:
+        parts.append("<tr>")
+
+        for day in week:
+            if not day:
+                parts.append(
+                    '<td class="empty-day"></td>'
+                )
+                continue
+
+            is_today = (
+                month.year,
+                month.month,
+                day,
+            ) == (
+                today.year,
+                today.month,
+                today.day,
+            )
+
+            css_class = (
+                ' class="today"'
+                if is_today
+                else ""
+            )
+
+            today_label = (
+                '<span class="today-label">오늘</span>'
+                if is_today
+                else ""
+            )
+
+            parts.append(
+                f"<td{css_class}>"
+                f'<div class="day-number">'
+                f"{day}{today_label}</div>"
+            )
+
+            items = sorted(
+                by_day.get(day, []),
+                key=lambda item: (
+                    str(item.get("title") or ""),
+                    str(item["id"]),
+                ),
+            )
+
+            for item in items:
+                title = escape(
+                    str(
+                        item.get("title")
+                        or "제목 없음"
+                    ),
+                    quote=True,
+                )
+
+                parts.append(
+                    f'<div class="visit-event" '
+                    f'title="{title}">{title}</div>'
+                )
+
+            parts.append("</td>")
+
+        parts.append("</tr>")
+
+    parts.append("</tbody></table></div>")
+
+    return "".join(parts)
+
+
+def show_visit_calendar(
+    notes,
+    scope,
+    today,
+    timezone_name,
+):
+    st.subheader("📅 진료 캘린더")
+
+    st.caption(
+        "현재 선택한 관리 대상의 진료일·예정일을 표시해요. "
+        f"오늘 표시 기준: {timezone_name}."
+    )
+
+    month_key = (
+        f"visit_calendar_month_{scope}_{timezone_name}"
+    )
+
+    if month_key not in st.session_state:
+        st.session_state[month_key] = (
+            today.replace(day=1)
+        )
+
+    month = st.session_state[month_key]
+
+    left, center, right = st.columns([1, 2, 1])
+
+    if left.button(
+        "◀ 이전 달",
+        key=f"visit_calendar_prev_{scope}",
+        disabled=(
+            month.year,
+            month.month,
+        ) == (1, 1),
+        use_container_width=True,
+    ):
+        st.session_state[month_key] = (
+            shift_calendar_month(month, -1)
+        )
+        st.rerun()
+
+    center.markdown(
+        f"### {month.year}년 {month.month}월"
+    )
+
+    if right.button(
+        "다음 달 ▶",
+        key=f"visit_calendar_next_{scope}",
+        disabled=(
+            month.year,
+            month.month,
+        ) == (9999, 12),
+        use_container_width=True,
+    ):
+        st.session_state[month_key] = (
+            shift_calendar_month(month, 1)
+        )
+        st.rerun()
+
+    if st.button(
+        "이번 달 보기",
+        key=f"visit_calendar_today_{scope}",
+    ):
+        st.session_state[month_key] = (
+            today.replace(day=1)
+        )
+        st.rerun()
+
+    st.markdown("""
+<style>
+.visit-calendar-wrap {
+    overflow-x: auto;
+    margin: 12px 0;
+}
+
+.visit-calendar {
+    width: 100%;
+    min-width: 560px;
+    table-layout: fixed;
+    border-collapse: collapse;
+    background: white;
+}
+
+.visit-calendar th {
+    text-align: center;
+    padding: 10px 4px;
+    background: #F1F3F8;
+    color: #24354B;
+    border: 1px solid #E2E5EB;
+}
+
+.visit-calendar td {
+    height: 115px;
+    vertical-align: top;
+    padding: 7px;
+    border: 1px solid #E2E5EB;
+}
+
+.visit-calendar .empty-day {
+    background: #F8F9FB;
+}
+
+.visit-calendar .today {
+    background: #FFF5F5;
+    box-shadow: inset 0 0 0 2px #E45858;
+}
+
+.visit-calendar .day-number {
+    font-weight: 700;
+    color: #24354B;
+    margin-bottom: 6px;
+}
+
+.visit-calendar .today-label {
+    margin-left: 4px;
+    color: #BA3535;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.visit-calendar .visit-event {
+    background: #EDF0F5;
+    color: #24354B;
+    border-radius: 6px;
+    margin-top: 5px;
+    padding: 5px;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    st.markdown(
+        calendar_html(notes, month, today),
+        unsafe_allow_html=True,
+    )
+
+    month_prefix = (
+        f"{month.year:04d}-{month.month:02d}-"
+    )
+
+    month_count = sum(
+        str(
+            item.get("visit_date") or ""
+        ).startswith(month_prefix)
+        for item in notes
+    )
+
+    undated_count = sum(
+        not item.get("visit_date")
+        for item in notes
+    )
+
+    st.caption(
+        f"이번 표시 월의 진료 일정 {month_count}건 · "
+        f"진료일 미입력 노트 {undated_count}건"
+    )
+
+    st.caption(
+        "진료 날짜가 있는 노트만 캘린더에 표시돼요. "
+        "노트 내용은 아래 목록에서 선택해 확인해 주세요."
+    )
+
+    st.divider()
+
+
+# 노트 작성
 def default_note_mode(note):
     if note and (
         note.get("completed")
@@ -46,6 +351,7 @@ def build_note_values(mode, fields, note=None):
             "followup_notes": "",
             "completed": False,
         }
+
     else:
         values = {}
 
@@ -58,7 +364,6 @@ def build_note_values(mode, fields, note=None):
         ),
     })
 
-    # 일정 모드에서는 기존 질문·진료 후 내용 등을 수정하지 않아요.
     if mode == "진료 일정 저장":
         return values
 
@@ -296,7 +601,6 @@ profile = profile_map[profile_id]
 
 scope = f"{user.id}_{profile_id}"
 ui_scope = f"{scope}_{timezone_name}"
-
 today = get_local_now().date()
 
 st.subheader(f"{profile['name']}의 진료 노트")
@@ -327,12 +631,21 @@ except Exception as error:
     )
     st.stop()
 
+
+# 현재 관리 대상의 노트만 캘린더에 전달
+show_visit_calendar(
+    notes,
+    scope,
+    today,
+    timezone_name,
+)
+
+
 note_map = {
     item["id"]: item
     for item in notes
 }
 
-# 홈에서 특정 노트를 여는 연결 유지
 choice_key = f"visit_choice_{scope}"
 pending_key = f"visit_pending_{scope}"
 
@@ -372,11 +685,8 @@ selected_id = st.selectbox(
 
 note = note_map.get(selected_id)
 existing = note is not None
-
 form_version = fingerprint(note or {})
 
-
-# 작성 모드를 양식 밖에서 먼저 선택
 mode_key = f"visit_mode_{scope}_{selected_id}"
 
 mode = st.radio(
@@ -434,44 +744,35 @@ if (
         "저장된 기간은 저장 버튼을 누르기 전까지 유지돼요."
     )
 
-
-# 숨겨진 항목에는 기존 값을 준비해 두고,
-# 실제 저장 시 현재 모드에 해당하는 항목만 수정
 summary_start = original_summary_start
 summary_end = original_summary_end
 
 questions = (
     (note.get("questions") or "")
-    if existing
-    else ""
+    if existing else ""
 )
 
 memo = (
     (note.get("memo") or "")
-    if existing
-    else ""
+    if existing else ""
 )
 
 consultation_notes = (
     (note.get("consultation_notes") or "")
-    if existing
-    else ""
+    if existing else ""
 )
 
 followup_notes = (
     (note.get("followup_notes") or "")
-    if existing
-    else ""
+    if existing else ""
 )
 
 completed = (
     bool(note.get("completed"))
-    if existing
-    else False
+    if existing else False
 )
 
 
-# 선택한 모드에 맞는 작성 화면
 with st.form(
     f"visit_form_{ui_scope}_{selected_id}_{form_version}_{mode}"
 ):
@@ -855,16 +1156,8 @@ except Exception as error:
 
 
 c1, c2 = st.columns(2)
-
-c1.metric(
-    "혈당 기록",
-    f"{len(glucose_rows)}건",
-)
-
-c2.metric(
-    "식사·활동 기록",
-    f"{len(lifestyle_rows)}건",
-)
+c1.metric("혈당 기록", f"{len(glucose_rows)}건")
+c2.metric("식사·활동 기록", f"{len(lifestyle_rows)}건")
 
 summary = pd.DataFrame()
 
@@ -955,7 +1248,7 @@ st.caption(
 )
 
 
-# 기간 내 혈당 기록을 노트에 추가
+# 혈당 기록 선택
 st.divider()
 st.subheader("⭐ 진료 때 확인할 혈당 기록")
 
@@ -1034,7 +1327,7 @@ if glucose_rows:
                 st.rerun()
 
 
-# 골라둔 기록은 요약 기간 밖이어도 별도로 조회
+# 선택 기록은 요약 기간 밖이어도 별도로 조회
 pinned_rows = []
 
 try:
@@ -1166,7 +1459,7 @@ if pinned_ids:
                 st.rerun()
 
 
-# 텍스트 다운로드
+# TXT 다운로드
 st.divider()
 st.subheader("📥 진료 노트 다운로드")
 
