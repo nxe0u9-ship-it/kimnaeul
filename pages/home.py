@@ -5,13 +5,14 @@ import streamlit as st
 from app_shared import (
     require_login,
     get_timezone_name,
-    get_local_now
+    get_local_now,
 )
 from sidebar_menu import show_sidebar_menu
 
 
 def show_error(message, error):
     st.error(message)
+
     st.caption(
         f"오류 종류: {type(error).__name__} / "
         f"오류 코드: {getattr(error, 'code', None) or '없음'}"
@@ -19,8 +20,13 @@ def show_error(message, error):
 
 
 def count_today(
-    client, user_id, profile_id,
-    table, id_column, date_column, today
+    client,
+    user_id,
+    profile_id,
+    table,
+    id_column,
+    date_column,
+    today,
 ):
     result = (
         client.table(table)
@@ -62,11 +68,7 @@ def fridge_expiry_display(value, today):
             )
 
     except (ValueError, TypeError):
-        return (
-            "확인 필요",
-            "⚠️ 날짜 확인 필요",
-            "invalid"
-        )
+        return "확인 필요", "⚠️ 날짜 확인 필요", "invalid"
 
     remaining = (expiry - today).days
 
@@ -74,35 +76,36 @@ def fridge_expiry_display(value, today):
         return (
             expiry.isoformat(),
             f"🔴 기한 지남 · {-remaining}일 경과",
-            "expired"
+            "expired",
         )
 
     if remaining == 0:
         return (
             expiry.isoformat(),
             "🟠 오늘까지",
-            "today"
+            "today",
         )
 
     return (
         expiry.isoformat(),
         f"기한까지 {remaining}일",
-        "upcoming"
+        "upcoming",
     )
 
 
+# 홈의 냉장고 조회 화면
 def show_shared_fridge(
     client,
     user_id,
     today,
-    timezone_name
+    timezone_name,
 ):
     st.divider()
     st.subheader("🧊 우리 가족 냉장고")
 
     st.caption(
-        "같은 계정의 가족과 반려동물이 공유하는 재료예요. "
-        "홈에서는 목록만 확인할 수 있어요."
+        "이름별로 냉장고를 선택해 저장된 재료를 확인해요. "
+        "재료 추가·수정·삭제는 냉장고 페이지에서 할 수 있어요."
     )
 
     st.caption(
@@ -110,34 +113,77 @@ def show_shared_fridge(
         "화면을 다시 불러올 때 갱신돼요."
     )
 
+    selected_id = None
+
     try:
-        rows = (
-            client.table("family_fridges")
-            .select("ingredients")
+        fridges = (
+            client.table("family_refrigerators")
+            .select("id,name,ingredients")
             .eq("user_id", user_id)
-            .limit(1)
+            .order("created_at")
+            .order("id")
             .execute()
             .data
         ) or []
 
-        if not rows:
+        if not fridges:
             st.info(
-                "아직 공유 냉장고를 만들지 않았어요. "
-                "냉장고 페이지에서 기존 재료를 합쳐 시작해 주세요."
+                "아직 냉장고가 없어요. "
+                "냉장고 페이지에서 이름을 정해 만들어 주세요."
             )
 
         else:
+            fridge_map = {
+                item["id"]: item
+                for item in fridges
+            }
+
+            choice_key = (
+                f"home_fridge_choice_{user_id}"
+            )
+
+            if (
+                st.session_state.get(choice_key)
+                not in fridge_map
+            ):
+                last_selected = st.session_state.get(
+                    f"active_fridge_{user_id}"
+                )
+
+                st.session_state[choice_key] = (
+                    last_selected
+                    if last_selected in fridge_map
+                    else fridges[0]["id"]
+                )
+
+            selected_id = st.selectbox(
+                "홈에서 확인할 냉장고",
+                list(fridge_map),
+                format_func=lambda value: (
+                    fridge_map[value]["name"]
+                ),
+                key=choice_key,
+            )
+
+            fridge = fridge_map[selected_id]
             ingredients = (
-                rows[0].get("ingredients") or []
+                fridge.get("ingredients") or []
+            )
+
+            st.caption(
+                f"등록된 냉장고 {len(fridges)}개 · "
+                f"현재 목록: {fridge['name']} · "
+                f"재료 {len(ingredients)}종류"
             )
 
             if not ingredients:
                 st.info(
-                    "냉장고에 저장된 재료가 없어요."
+                    "선택한 냉장고에 저장된 재료가 없어요."
                 )
 
             else:
                 ingredient_table = []
+
                 expired_count = 0
                 today_count = 0
                 invalid_count = 0
@@ -148,7 +194,7 @@ def show_shared_fridge(
                     expiry_label, status, category = (
                         fridge_expiry_display(
                             item.get("expiry_date"),
-                            today
+                            today,
                         )
                     )
 
@@ -167,25 +213,19 @@ def show_shared_fridge(
                             else "미입력"
                         ),
                         "단위": (
-                            item.get("unit") or ""
+                            (item.get("unit") or "")
                             if amount is not None
                             else "—"
                         ),
                         "유통·소비기한": expiry_label,
-                        "상태": status
+                        "상태": status,
                     })
-
-                st.caption(
-                    f"저장된 재료 "
-                    f"{len(ingredient_table)}종류"
-                )
 
                 if expired_count:
                     st.warning(
-                        f"기한이 지난 재료가 "
+                        "선택한 냉장고에 기한이 지난 재료가 "
                         f"{expired_count}종류 있어요. "
-                        "냉장고 페이지에서 확인하고 "
-                        "삭제할 수 있어요."
+                        "냉장고 페이지에서 확인하고 삭제할 수 있어요."
                     )
 
                 if today_count:
@@ -200,7 +240,6 @@ def show_shared_fridge(
                         "냉장고 페이지에서 기한을 수정해 주세요."
                     )
 
-                # 편집 기능이 없는 조회용 표
                 st.dataframe(
                     ingredient_table,
                     column_order=[
@@ -208,33 +247,49 @@ def show_shared_fridge(
                         "보유량",
                         "단위",
                         "유통·소비기한",
-                        "상태"
+                        "상태",
                     ],
                     hide_index=True,
-                    use_container_width=True
+                    use_container_width=True,
                 )
 
                 st.caption(
                     "기한이 지난 재료는 자동 삭제되지 않아요. "
-                    "표시된 날짜와 별개로 "
-                    "실제 보관 상태를 확인해 주세요."
+                    "표시된 날짜와 별개로 실제 보관 상태를 확인해 주세요."
                 )
 
     except Exception as error:
+        selected_id = None
+
         show_error(
-            "공유 냉장고 목록을 불러오지 못했어요. "
-            "냉장고 페이지에서 저장 상태를 확인해 주세요.",
-            error
+            "냉장고 목록을 불러오지 못했어요. "
+            "여러 냉장고용 SQL 실행 여부와 "
+            "냉장고 페이지의 저장 상태를 확인해 주세요.",
+            error,
         )
 
-    st.page_link(
-        "pages/meal.py",
-        label="냉장고 관리·식단 추천으로 이동",
-        icon="🍽️"
-    )
+    if selected_id is not None:
+        if st.button(
+            "🍽️ 선택한 냉장고 관리·식단 추천으로 이동",
+            key=f"home_open_fridge_{user_id}",
+            use_container_width=True,
+        ):
+            st.session_state[
+                f"fridge_pending_{user_id}"
+            ] = selected_id
+
+            st.switch_page("pages/meal.py")
+
+    else:
+        st.page_link(
+            "pages/meal.py",
+            label="냉장고 만들기·관리로 이동",
+            icon="🍽️",
+        )
 
     st.caption(
-        "재료 추가·수정·삭제·초기화와 식단 추천은 "
+        "홈에서는 재료 목록만 확인해요. "
+        "냉장고 생성·이름 변경·재료 관리·초기화와 식단 추천은 "
         "냉장고 페이지에서 할 수 있어요."
     )
 
@@ -242,12 +297,14 @@ def show_shared_fridge(
 st.set_page_config(
     page_title="우리 가족 케어 | 당당케어",
     page_icon="🏠",
-    layout="wide"
+    layout="wide",
 )
 
 st.markdown("""
 <style>
-.stApp { background-color: #FFF9F9; }
+.stApp {
+    background-color: #FFF9F9;
+}
 
 div.stButton > button {
     border-radius: 14px;
@@ -256,7 +313,9 @@ div.stButton > button {
 """, unsafe_allow_html=True)
 
 
-profile_menu = show_sidebar_menu("pages/home.py")
+profile_menu = show_sidebar_menu(
+    "pages/home.py"
+)
 
 client, user = require_login()
 
@@ -272,7 +331,7 @@ st.caption(
 )
 
 
-# 관리 대상 목록
+# 관리 대상 조회
 try:
     profiles = (
         client.table("care_profiles")
@@ -286,7 +345,7 @@ try:
 except Exception as error:
     show_error(
         "관리 대상 목록을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
@@ -300,7 +359,7 @@ if not profiles:
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
-        icon="➕"
+        icon="➕",
     )
 
     st.stop()
@@ -311,11 +370,16 @@ profile_map = {
     for item in profiles
 }
 
-if st.session_state.get("active_profile") not in profile_map:
-    st.session_state.active_profile = profiles[0]["id"]
+if (
+    st.session_state.get("active_profile")
+    not in profile_map
+):
+    st.session_state.active_profile = (
+        profiles[0]["id"]
+    )
 
 
-# 왼쪽 관리 대상 선택
+# 사이드바 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
@@ -331,7 +395,9 @@ with profile_menu:
             or item["profile_type"]
         )
 
-        label = f"{icon} {item['name']} · {kind}"
+        label = (
+            f"{icon} {item['name']} · {kind}"
+        )
 
         if sum(
             p["name"] == item["name"]
@@ -348,9 +414,11 @@ with profile_menu:
             label,
             key=f"home_profile_{user.id}_{item['id']}",
             type="primary" if active else "secondary",
-            use_container_width=True
+            use_container_width=True,
         ):
-            st.session_state.active_profile = item["id"]
+            st.session_state.active_profile = (
+                item["id"]
+            )
             st.rerun()
 
 
@@ -369,25 +437,24 @@ c1, c2, c3 = st.columns(3)
 
 c1.metric(
     "등록된 관리 대상",
-    str(len(profiles))
+    str(len(profiles)),
 )
 
 c2.metric(
     "사람",
-    f"{people_count}명"
+    f"{people_count}명",
 )
 
 c3.metric(
     "반려동물",
-    f"{pet_count}마리"
+    f"{pet_count}마리",
 )
 
 
-# 관리 대상 추가 바로가기
 st.page_link(
     "pages/record.py",
     label="관리 대상 추가하러 가기",
-    icon="➕"
+    icon="➕",
 )
 
 st.caption(
@@ -399,12 +466,12 @@ if st.button("🔄 최신 기록 다시 불러오기"):
     st.rerun()
 
 
-# 계정 전체 공유 냉장고 목록
+# 이름별 냉장고 목록
 show_shared_fridge(
     client,
     user.id,
     today,
-    timezone_name
+    timezone_name,
 )
 
 
@@ -435,7 +502,10 @@ for item in profiles:
             f"### {icon} {item['name']} · {kind}"
         )
 
-        if profile_id == st.session_state.active_profile:
+        if (
+            profile_id
+            == st.session_state.active_profile
+        ):
             st.caption("현재 선택한 관리 대상")
 
         try:
@@ -462,7 +532,7 @@ for item in profiles:
                 "blood_glucose",
                 "record_id",
                 "measure_date",
-                today
+                today,
             )
 
             lifestyle_count = count_today(
@@ -472,13 +542,13 @@ for item in profiles:
                 "lifestyle_records",
                 "id",
                 "record_date",
-                today
+                today,
             )
 
         except Exception as error:
             show_error(
                 "이 대상의 기록 현황을 불러오지 못했어요.",
-                error
+                error,
             )
 
         else:
@@ -489,7 +559,7 @@ for item in profiles:
 
                 c1.metric(
                     "최근 혈당",
-                    f"{latest['glucose']} mg/dL"
+                    f"{latest['glucose']} mg/dL",
                 )
 
                 st.caption(
@@ -501,17 +571,17 @@ for item in profiles:
             else:
                 c1.metric(
                     "최근 혈당",
-                    "기록 없음"
+                    "기록 없음",
                 )
 
             c2.metric(
                 "오늘 날짜의 혈당 기록",
-                f"{blood_count}건"
+                f"{blood_count}건",
             )
 
             c3.metric(
                 "오늘 날짜의 식사·활동 기록",
-                f"{lifestyle_count}건"
+                f"{lifestyle_count}건",
             )
 
             if blood_count == 0:
@@ -529,32 +599,33 @@ for item in profiles:
         if c1.button(
             "🩸 혈당 기록",
             key=f"home_blood_{user.id}_{profile_id}",
-            use_container_width=True
+            use_container_width=True,
         ):
             move_to_profile(
                 profile_id,
-                "pages/record.py"
+                "pages/record.py",
             )
 
         if c2.button(
             "📈 기록 확인",
             key=f"home_history_{user.id}_{profile_id}",
-            use_container_width=True
+            use_container_width=True,
         ):
             move_to_profile(
                 profile_id,
-                "pages/history.py"
+                "pages/history.py",
             )
 
         if c3.button(
             "📝 식사·활동",
             key=f"home_lifestyle_{user.id}_{profile_id}",
-            use_container_width=True
+            use_container_width=True,
         ):
             move_to_profile(
                 profile_id,
-                "pages/lifestyle.py"
+                "pages/lifestyle.py",
             )
+
 
 st.caption(
     "식사·활동 건수는 저장된 행의 수예요. "
@@ -579,7 +650,7 @@ try:
         .gte("visit_date", today.isoformat())
         .lte(
             "visit_date",
-            (today + timedelta(days=30)).isoformat()
+            (today + timedelta(days=30)).isoformat(),
         )
         .order("visit_date")
         .order("id")
@@ -591,7 +662,7 @@ try:
 except Exception as error:
     show_error(
         "진료 예정 목록을 불러오지 못했어요.",
-        error
+        error,
     )
 
 else:
@@ -613,7 +684,9 @@ else:
             visit["visit_date"]
         )
 
-        remaining = (visit_day - today).days
+        remaining = (
+            visit_day - today
+        ).days
 
         day_label = (
             "오늘"
@@ -632,11 +705,13 @@ else:
 
             if st.button(
                 "🏥 이 진료 노트 열기",
-                key=f"home_visit_{user.id}_{visit['id']}"
+                key=f"home_visit_{user.id}_{visit['id']}",
             ):
                 target_id = visit["profile_id"]
 
-                st.session_state.active_profile = target_id
+                st.session_state.active_profile = (
+                    target_id
+                )
 
                 st.session_state[
                     f"visit_pending_{user.id}_{target_id}"
@@ -650,10 +725,11 @@ else:
             "나머지 노트는 진료 노트 페이지에서 확인해 주세요."
         )
 
+
 st.page_link(
     "pages/visit.py",
     label="진료 노트 작성·관리하기",
-    icon="🏥"
+    icon="🏥",
 )
 
 st.caption(
@@ -663,7 +739,7 @@ st.caption(
 )
 
 
-# 자주 쓰는 기능
+# 바로가기
 st.divider()
 st.subheader("✨ 바로가기")
 
@@ -673,12 +749,12 @@ with c1:
     st.page_link(
         "pages/meal.py",
         label="냉장고 재료·식사 조건 입력",
-        icon="🍽️"
+        icon="🍽️",
     )
 
 with c2:
     st.page_link(
         "pages/explore.py",
         label="내 기록 비교·탐색",
-        icon="🔍"
+        icon="🔍",
     )
