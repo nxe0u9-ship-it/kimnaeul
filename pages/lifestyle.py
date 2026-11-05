@@ -339,10 +339,7 @@ def show_record_summary(rows, start, end, kind_filter):
             "기간 전체를 확인하려면 조회 기간을 줄여 주세요."
         )
 
-    st.caption(
-        "기록이 없는 날짜를 식사·활동·수면이 없었던 날로 "
-        "계산하지 않아요."
-    )
+ 
     st.divider()
 
 
