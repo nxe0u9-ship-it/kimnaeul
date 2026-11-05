@@ -7,15 +7,19 @@ from app_shared import (
     require_login,
     get_timezone_name,
     get_user_timezone,
-    get_local_now
+    get_local_now,
 )
-from record_links import show_record_links
 from sidebar_menu import show_sidebar_menu
 
 
 MEALS = [
-    "선택해 주세요", "공복", "식전",
-    "식후 1시간", "식후 2시간", "취침 전", "기타"
+    "선택해 주세요",
+    "공복",
+    "식전",
+    "식후 1시간",
+    "식후 2시간",
+    "취침 전",
+    "기타",
 ]
 
 
@@ -30,12 +34,15 @@ def show_error(message, error):
 st.set_page_config(
     page_title="혈당 기록하기 | 당당케어",
     page_icon="🩸",
-    layout="wide"
+    layout="wide",
 )
 
-st.markdown("""
+st.markdown(
+    """
 <style>
-.stApp { background-color: #FFF9F9; }
+.stApp {
+    background-color: #FFF9F9;
+}
 
 div.stButton > button {
     border-radius: 14px;
@@ -48,27 +55,22 @@ div[data-testid="stForm"] {
     border: 1px solid #EEEEEE;
 }
 </style>
-""", unsafe_allow_html=True)
-
+""",
+    unsafe_allow_html=True,
+)
 
 profile_menu = show_sidebar_menu("pages/record.py")
-
-
-# 로그인 확인과 계정 시간대
 client, user = require_login()
 
 user_timezone = get_user_timezone()
 timezone_name = get_timezone_name()
 
 st.title("🩸 혈당 기록하기")
-
 st.caption(
     "왼쪽에서 관리 대상을 선택해 혈당을 기록해요. "
     "이전 기록은 ‘기록 확인·수정’에서 확인할 수 있어요."
 )
 
-
-# 관리 대상 불러오기
 try:
     profiles = (
         client.table("care_profiles")
@@ -82,20 +84,18 @@ try:
 except Exception as error:
     show_error(
         "관리 대상 목록을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
-
-# 관리 대상 등록
 with st.expander(
     "➕ 관리 대상 추가",
-    expanded=not profiles
+    expanded=not profiles,
 ):
     profile_type = st.radio(
         "대상 구분",
         ["사람", "반려동물"],
-        horizontal=True
+        horizontal=True,
     )
 
     animal_choice = None
@@ -103,16 +103,16 @@ with st.expander(
     if profile_type == "반려동물":
         animal_choice = st.selectbox(
             "동물 종류",
-            ["강아지", "고양이", "기타"]
+            ["강아지", "고양이", "기타"],
         )
 
     with st.form(
         "add_profile",
-        clear_on_submit=True
+        clear_on_submit=True,
     ):
         name = st.text_input(
             "이름 또는 별명",
-            max_chars=50
+            max_chars=50,
         )
 
         custom_animal = ""
@@ -121,22 +121,19 @@ with st.expander(
             custom_animal = st.text_input(
                 "동물 종류 직접 입력",
                 placeholder="예: 토끼, 햄스터, 기니피그",
-                max_chars=50
+                max_chars=50,
             )
 
         added = st.form_submit_button(
             "관리 대상 등록",
-            use_container_width=True
+            use_container_width=True,
         )
 
     if added:
         if not name.strip():
             st.warning("이름 또는 별명을 입력해 주세요.")
 
-        elif (
-            animal_choice == "기타"
-            and not custom_animal.strip()
-        ):
+        elif animal_choice == "기타" and not custom_animal.strip():
             st.warning("동물 종류를 직접 입력해 주세요.")
 
         else:
@@ -152,86 +149,70 @@ with st.expander(
             new_profile_id = str(uuid4())
 
             try:
-                client.table("care_profiles").insert(
-                    {
-                        "id": new_profile_id,
-                        "user_id": user.id,
-                        "name": name.strip(),
-                        "profile_type": profile_type,
-                        "animal_type": animal_type
-                    },
-                    returning="minimal"
-                ).execute()
+                (
+                    client.table("care_profiles")
+                    .insert(
+                        {
+                            "id": new_profile_id,
+                            "user_id": user.id,
+                            "name": name.strip(),
+                            "profile_type": profile_type,
+                            "animal_type": animal_type,
+                        },
+                        returning="minimal",
+                    )
+                    .execute()
+                )
 
             except Exception as error:
                 show_error(
                     "관리 대상을 등록하지 못했어요. "
                     "잠시 후 다시 시도해 주세요.",
-                    error
+                    error,
                 )
 
             else:
                 st.session_state.active_profile = new_profile_id
                 st.rerun()
 
-
 if not profiles:
     profile_menu.caption("등록된 관리 대상이 없어요.")
-
     st.info(
         "먼저 위에서 관리 대상을 등록해 주세요. "
         "사람과 반려동물을 함께 등록할 수 있어요."
     )
     st.stop()
 
-
 profile_map = {
-    item["id"]: item
-    for item in profiles
+    item["id"]: item for item in profiles
 }
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
-
-# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
     for item in profiles:
-        kind = (
-            item.get("animal_type")
-            or item["profile_type"]
-        )
-
-        icon = (
-            "👤"
-            if item["profile_type"] == "사람"
-            else "🐾"
-        )
-
+        kind = item.get("animal_type") or item["profile_type"]
+        icon = "👤" if item["profile_type"] == "사람" else "🐾"
         label = f"{icon} {item['name']} · {kind}"
 
-        if sum(
-            p["name"] == item["name"]
-            for p in profiles
-        ) > 1:
+        if sum(p["name"] == item["name"] for p in profiles) > 1:
             label += f" · {item['id'][:8]}"
 
         is_selected = (
-            item["id"]
-            == st.session_state.active_profile
+            item["id"] == st.session_state.active_profile
         )
 
         if st.button(
             label,
             key=f"choose_profile_{item['id']}",
             type="primary" if is_selected else "secondary",
-            use_container_width=True
+            use_container_width=True,
         ):
             st.session_state.active_profile = item["id"]
             st.rerun()
-
 
 selected_id = st.session_state.active_profile
 profile = profile_map[selected_id]
@@ -245,10 +226,7 @@ st.caption(
     f"현재 시각 {now:%Y-%m-%d %H:%M}"
 )
 
-
-# 저장 완료 안내와 입력 양식 초기화 번호
 scope = f"{user.id}_{selected_id}"
-
 notice_key = f"glucose_notice_{scope}"
 revision_key = f"glucose_revision_{scope}"
 revision = st.session_state.get(revision_key, 0)
@@ -259,28 +237,22 @@ if notice:
     st.success(notice)
 
 profile_notice_key = f"profile_edit_notice_{scope}"
-
 profile_notice = st.session_state.pop(
-    profile_notice_key,
-    None
+    profile_notice_key, None
 )
 
 if profile_notice:
     st.success(profile_notice)
 
-
-# 관리 대상 이름 수정
 current_name = profile["name"]
 name_form_key = f"profile_name_form_{scope}_{current_name}"
 
 with st.expander("✏️ 관리 대상 이름 수정"):
     st.text(f"현재 등록된 이름: {current_name}")
-
     st.caption(
         "이 대상을 어떤 새 이름으로 바꿀까요? "
         "다른 대상을 수정하려면 왼쪽 메뉴에서 먼저 선택해 주세요."
     )
-
     st.caption(
         "이름을 변경해도 기존 혈당·식사·활동 기록과 "
         "진료 노트는 같은 관리 대상에 연결돼요."
@@ -292,7 +264,7 @@ with st.expander("✏️ 관리 대상 이름 수정"):
             value="",
             placeholder="기존 이름 대신 사용할 새 이름 입력",
             max_chars=50,
-            key=f"{name_form_key}_new_name"
+            key=f"{name_form_key}_new_name",
         )
 
         proposed_name = edited_name.strip()
@@ -303,25 +275,26 @@ with st.expander("✏️ 관리 대상 이름 수정"):
 
         elif proposed_name:
             st.text(
-                f"변경 전: {current_name} → 변경 후: {proposed_name}"
+                f"변경 전: {current_name} → "
+                f"변경 후: {proposed_name}"
             )
 
             save_name = st.button(
-                f"💾 ‘{current_name}’ → ‘{proposed_name}’ 변경 저장",
+                f"💾 ‘{current_name}’ → "
+                f"‘{proposed_name}’ 변경 저장",
                 key=f"{name_form_key}_save",
-                use_container_width=True
+                use_container_width=True,
             )
 
         else:
             st.caption(
                 "새 이름을 입력하면 변경 전·후 이름이 표시돼요."
             )
-
             st.button(
                 "💾 새 이름으로 변경 저장",
                 key=f"{name_form_key}_save",
                 use_container_width=True,
-                disabled=True
+                disabled=True,
             )
 
     if save_name:
@@ -331,7 +304,9 @@ with st.expander("✏️ 관리 대상 이름 수정"):
             st.warning("새 이름 또는 별명을 입력해 주세요.")
 
         elif len(new_name) > 50:
-            st.warning("이름 또는 별명은 50자 이내로 입력해 주세요.")
+            st.warning(
+                "이름 또는 별명은 50자 이내로 입력해 주세요."
+            )
 
         elif new_name == current_name:
             st.info("현재와 동일한 이름이에요.")
@@ -342,7 +317,7 @@ with st.expander("✏️ 관리 대상 이름 수정"):
                     client.table("care_profiles")
                     .update(
                         {"name": new_name},
-                        returning="representation"
+                        returning="representation",
                     )
                     .eq("user_id", user.id)
                     .eq("id", selected_id)
@@ -359,7 +334,7 @@ with st.expander("✏️ 관리 대상 이름 수정"):
                 show_error(
                     "이름 수정 결과를 확인하지 못했어요. "
                     "페이지를 다시 열어 확인해 주세요.",
-                    error
+                    error,
                 )
 
             else:
@@ -369,12 +344,9 @@ with st.expander("✏️ 관리 대상 이름 수정"):
                 )
                 st.rerun()
 
-
-# 등록된 반려동물 종류 수정
 if profile["profile_type"] == "반려동물":
     current_animal = profile.get("animal_type") or ""
     animal_options = ["강아지", "고양이", "기타"]
-
     edit_version = f"{scope}_{current_animal}"
 
     with st.expander("🐾 동물 종류 수정"):
@@ -391,10 +363,12 @@ if profile["profile_type"] == "반려동물":
                 if current_animal in ["강아지", "고양이"]
                 else 2
             ),
-            key=f"edit_animal_choice_{edit_version}"
+            key=f"edit_animal_choice_{edit_version}",
         )
 
-        with st.form(f"edit_animal_form_{edit_version}"):
+        with st.form(
+            f"edit_animal_form_{edit_version}"
+        ):
             edit_custom_animal = ""
 
             if edit_animal_choice == "기타":
@@ -406,12 +380,12 @@ if profile["profile_type"] == "반려동물":
                         else ""
                     ),
                     placeholder="예: 토끼, 햄스터, 기니피그",
-                    max_chars=50
+                    max_chars=50,
                 )
 
             update_animal = st.form_submit_button(
                 "💾 동물 종류 수정 저장",
-                use_container_width=True
+                use_container_width=True,
             )
 
         if update_animal:
@@ -422,10 +396,14 @@ if profile["profile_type"] == "반려동물":
             )
 
             if not new_animal:
-                st.warning("변경할 동물 종류를 입력해 주세요.")
+                st.warning(
+                    "변경할 동물 종류를 입력해 주세요."
+                )
 
             elif new_animal == current_animal:
-                st.info("현재 등록된 동물 종류와 같아요.")
+                st.info(
+                    "현재 등록된 동물 종류와 같아요."
+                )
 
             else:
                 try:
@@ -433,7 +411,7 @@ if profile["profile_type"] == "반려동물":
                         client.table("care_profiles")
                         .update(
                             {"animal_type": new_animal},
-                            returning="representation"
+                            returning="representation",
                         )
                         .eq("user_id", user.id)
                         .eq("id", selected_id)
@@ -451,7 +429,7 @@ if profile["profile_type"] == "반려동물":
                     show_error(
                         "동물 종류 수정 결과를 확인하지 못했어요. "
                         "페이지를 다시 열어 확인해 주세요.",
-                        error
+                        error,
                     )
 
                 else:
@@ -461,12 +439,7 @@ if profile["profile_type"] == "반려동물":
                     )
                     st.rerun()
 
-
-# 혈당 입력
-# 시간대가 바뀌면 이전 시간대의 입력값을 재사용하지 않아요.
-form_key = (
-    f"glucose_{scope}_{revision}_{timezone_name}"
-)
+form_key = f"glucose_{scope}_{revision}_{timezone_name}"
 
 with st.form(form_key):
     c1, c2 = st.columns(2)
@@ -475,17 +448,14 @@ with st.form(form_key):
         "📅 측정 날짜",
         value=now.date(),
         max_value=now.date(),
-        key=f"{form_key}_date"
+        key=f"{form_key}_date",
     )
 
     measure_time = c2.time_input(
         "🕐 측정 시간",
-        value=now.time().replace(
-            second=0,
-            microsecond=0
-        ),
+        value=now.time().replace(second=0, microsecond=0),
         step=60,
-        key=f"{form_key}_time"
+        key=f"{form_key}_time",
     )
 
     st.caption(
@@ -500,13 +470,13 @@ with st.form(form_key):
         max_value=1000,
         value=0,
         step=1,
-        key=f"{form_key}_glucose"
+        key=f"{form_key}_glucose",
     )
 
     meal = st.selectbox(
         "🍽️ 측정 시점",
         MEALS,
-        key=f"{form_key}_meal"
+        key=f"{form_key}_meal",
     )
 
     insulin = st.number_input(
@@ -514,40 +484,35 @@ with st.form(form_key):
         min_value=0.0,
         value=0.0,
         step=0.5,
-        key=f"{form_key}_insulin"
+        key=f"{form_key}_insulin",
     )
 
     memo = st.text_area(
         "📝 메모",
         placeholder="식사, 활동량, 컨디션 등을 기록해 주세요.",
-        key=f"{form_key}_memo"
+        key=f"{form_key}_memo",
     )
 
     saved = st.form_submit_button(
         "💾 혈당 기록 저장",
-        use_container_width=True
+        use_container_width=True,
     )
 
-
-# 혈당 저장
 if saved:
     measured_at = datetime.combine(
-        measure_date,
-        measure_time
+        measure_date, measure_time
     ).replace(tzinfo=user_timezone)
 
     current_time = get_local_now()
 
-    # 시계 전환으로 존재하지 않는 현지 시각인지 확인해요.
     round_trip = (
-        measured_at.astimezone(timezone.utc)
+        measured_at
+        .astimezone(timezone.utc)
         .astimezone(user_timezone)
         .replace(tzinfo=None)
     )
-
     entered_time = datetime.combine(
-        measure_date,
-        measure_time
+        measure_date, measure_time
     )
 
     if round_trip != entered_time:
@@ -573,25 +538,29 @@ if saved:
 
     else:
         try:
-            client.table("blood_glucose").insert(
-                {
-                    "user_id": user.id,
-                    "profile_id": selected_id,
-                    "name": profile["name"],
-                    "measure_date": measure_date.isoformat(),
-                    "measure_time": measure_time.strftime("%H:%M"),
-                    "glucose": glucose,
-                    "meal": meal,
-                    "insulin": insulin,
-                    "memo": memo
-                },
-                returning="minimal"
-            ).execute()
+            (
+                client.table("blood_glucose")
+                .insert(
+                    {
+                        "user_id": user.id,
+                        "profile_id": selected_id,
+                        "name": profile["name"],
+                        "measure_date": measure_date.isoformat(),
+                        "measure_time": measure_time.strftime("%H:%M"),
+                        "glucose": glucose,
+                        "meal": meal,
+                        "insulin": insulin,
+                        "memo": memo,
+                    },
+                    returning="minimal",
+                )
+                .execute()
+            )
 
         except Exception as error:
             show_error(
                 "기록을 저장하지 못했어요.",
-                error
+                error,
             )
 
         else:
@@ -599,21 +568,13 @@ if saved:
                 f"{profile['name']}의 혈당 "
                 f"{glucose} mg/dL 기록을 저장했어요!"
             )
-
-            st.session_state[revision_key] = (
-                revision + 1
-            )
-
+            st.session_state[revision_key] = revision + 1
             st.rerun()
 
-
-# 선택한 대상의 최근 혈당 기록
 st.divider()
-
 st.subheader(
     f"📋 {profile['name']}의 최근 혈당 기록"
 )
-
 st.caption(
     "측정 날짜·시간이 최신인 순서로 최대 3건을 표시해요."
 )
@@ -638,7 +599,7 @@ try:
 except Exception as error:
     show_error(
         "최근 혈당 기록을 불러오지 못했어요.",
-        error
+        error,
     )
 
 else:
@@ -650,7 +611,7 @@ else:
                 "혈당 (mg/dL)": row["glucose"],
                 "측정 시점": row.get("meal") or "미입력",
                 "인슐린 (단위)": row.get("insulin"),
-                "메모": row.get("memo") or ""
+                "메모": row.get("memo") or "",
             }
             for row in recent_rows
         ]
@@ -658,7 +619,7 @@ else:
         st.dataframe(
             recent_table,
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
     else:
@@ -667,16 +628,6 @@ else:
             "위에서 첫 기록을 입력해 주세요."
         )
 
-
-# 혈당과 식사·활동 연결
-show_record_links(
-    client=client,
-    user_id=user.id,
-    profile_id=selected_id
-)
-
-
-# 관련 페이지 이동
 st.divider()
 
 c1, c2, c3 = st.columns(3)
@@ -685,19 +636,19 @@ with c1:
     st.page_link(
         "pages/history.py",
         label="저장한 혈당 확인·수정하기",
-        icon="📈"
+        icon="📈",
     )
 
 with c2:
     st.page_link(
         "pages/lifestyle.py",
         label="식사·활동 기록하기",
-        icon="📝"
+        icon="📝",
     )
 
 with c3:
     st.page_link(
         "pages/meal.py",
         label="냉장고 재료·식사 조건 입력하기",
-        icon="🍽️"
+        icon="🍽️",
     )
