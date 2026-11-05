@@ -12,15 +12,18 @@ from app_shared import (
     require_login,
     get_timezone_name,
     get_user_timezone,
-    get_local_now
+    get_local_now,
 )
-from record_links import show_linked_records
 from sidebar_menu import show_sidebar_menu
 
 
 MEALS = [
-    "공복", "식전", "식후 1시간",
-    "식후 2시간", "취침 전", "기타"
+    "공복",
+    "식전",
+    "식후 1시간",
+    "식후 2시간",
+    "취침 전",
+    "기타",
 ]
 
 MEAL_COLORS = {
@@ -29,7 +32,7 @@ MEAL_COLORS = {
     "식후 1시간": "#EA580C",
     "식후 2시간": "#059669",
     "취침 전": "#3730A3",
-    "기타": "#64748B"
+    "기타": "#64748B",
 }
 
 COLUMN_NAMES = {
@@ -38,23 +41,19 @@ COLUMN_NAMES = {
     "glucose": "혈당 (mg/dL)",
     "meal": "측정 시점",
     "insulin": "인슐린 (단위)",
-    "memo": "메모"
+    "memo": "메모",
 }
 
 
 def fingerprint(value):
     return sha256(
-        json.dumps(
-            value, sort_keys=True, default=str
-        ).encode()
+        json.dumps(value, sort_keys=True, default=str).encode()
     ).hexdigest()[:16]
 
 
 def safe_filename_part(value):
     cleaned = re.sub(
-        r"[^\w.-]+",
-        "_",
-        str(value).strip()
+        r"[^\w.-]+", "_", str(value).strip()
     )
     return cleaned.strip("._-")[:60] or "profile"
 
@@ -76,22 +75,24 @@ def show_meal_legend():
         items.append(
             '<span style="display:inline-flex;'
             'align-items:center;gap:7px;white-space:nowrap;">'
-            f'<span aria-hidden="true" style="display:inline-block;'
-            f'width:11px;height:11px;border-radius:50%;'
-            f'background-color:{color};"></span>'
-            f'<span>{escape(label)}</span>'
-            '</span>'
+            '<span aria-hidden="true" '
+            'style="display:inline-block;width:11px;height:11px;'
+            f'border-radius:50%;background-color:{color};">'
+            "</span>"
+            f"<span>{escape(label)}</span>"
+            "</span>"
         )
 
     st.markdown(
         '<div style="display:flex;flex-wrap:wrap;'
         'gap:10px 20px;padding:12px 16px;'
-        'background-color:#FFFFFF;border:1px solid #E2E8F0;'
-        'border-radius:12px;font-size:14px;color:#334155;">'
+        'background-color:#FFFFFF;'
+        'border:1px solid #E2E8F0;border-radius:12px;'
+        'font-size:14px;color:#334155;">'
         '<span style="font-weight:600;">점 색상 · 측정 시점</span>'
         + "".join(items)
-        + '</div>',
-        unsafe_allow_html=True
+        + "</div>",
+        unsafe_allow_html=True,
     )
 
 
@@ -104,8 +105,15 @@ def display_records(rows):
 
 
 def load_records(
-    client, user_id, profile_id, start, end,
-    meal, search_date=None, time_range=None, memo=""
+    client,
+    user_id,
+    profile_id,
+    start,
+    end,
+    meal,
+    search_date=None,
+    time_range=None,
+    memo="",
 ):
     query = (
         client.table("blood_glucose")
@@ -128,14 +136,19 @@ def load_records(
         )
 
     if time_range is not None:
-        query = query.gte(
-            "measure_time",
-            time_range[0].strftime("%H:%M:%S")
-        ).lte(
-            "measure_time",
-            time_range[1].replace(
-                second=59, microsecond=999999
-            ).isoformat()
+        query = (
+            query
+            .gte(
+                "measure_time",
+                time_range[0].strftime("%H:%M:%S"),
+            )
+            .lte(
+                "measure_time",
+                time_range[1].replace(
+                    second=59,
+                    microsecond=999999,
+                ).isoformat(),
+            )
         )
 
     if memo.strip():
@@ -186,7 +199,7 @@ def select_from_table(rows, scope):
         use_container_width=True,
         on_select="rerun",
         selection_mode="single-row",
-        key=f"history_table_{scope}_{fingerprint(rows)}"
+        key=f"history_table_{scope}_{fingerprint(rows)}",
     )
 
     positions = event["selection"]["rows"]
@@ -205,7 +218,7 @@ def show_graph(rows, scope, selectable):
         chart["measure_date"].astype(str)
         + " "
         + chart["measure_time"].astype(str),
-        errors="coerce"
+        errors="coerce",
     )
 
     chart["glucose"] = pd.to_numeric(
@@ -216,7 +229,7 @@ def show_graph(rows, scope, selectable):
         chart.dropna(subset=["measured_at", "glucose"])
         .sort_values(
             ["measured_at", "record_id"],
-            kind="stable"
+            kind="stable",
         )
         .reset_index(drop=True)
     )
@@ -237,12 +250,11 @@ def show_graph(rows, scope, selectable):
         ["자동", "모두 표시", "숨기기"],
         index=2,
         horizontal=True,
-        key=f"history_labels_v2_{scope}"
+        key=f"history_labels_v2_{scope}",
     )
 
     count = len(chart)
     label_step = max(1, (count + 19) // 20)
-
     labels = []
 
     for i, value in enumerate(chart["glucose"]):
@@ -250,17 +262,18 @@ def show_graph(rows, scope, selectable):
             label_mode == "모두 표시"
             or (
                 label_mode == "자동"
-                and (i % label_step == 0 or i == count - 1)
+                and (
+                    i % label_step == 0
+                    or i == count - 1
+                )
             )
         )
         labels.append(f"{value:g}" if visible else "")
 
-    # 날짜마다 첫 측정 시각에 날짜 눈금을 한 번만 표시해요.
-    # 각 점은 원래 측정 날짜와 시간 위치를 유지해요.
     daily_ticks = (
         chart.groupby(
             chart["measured_at"].dt.normalize(),
-            sort=True
+            sort=True,
         )["measured_at"]
         .first()
         .tolist()
@@ -284,9 +297,9 @@ def show_graph(rows, scope, selectable):
     )
 
     previous = st.session_state.get(graph_key, {})
-    previous_points = previous.get(
-        "selection", {}
-    ).get("points", [])
+    previous_points = (
+        previous.get("selection", {}).get("points", [])
+    )
 
     selected_ids = set()
 
@@ -298,17 +311,16 @@ def show_graph(rows, scope, selectable):
                 selected_ids.add(str(custom[0]))
 
     selected_positions = [
-        i for i, record_id in enumerate(chart["record_id"])
+        i
+        for i, record_id in enumerate(chart["record_id"])
         if str(record_id) in selected_ids
     ]
-
     selected_position_set = set(selected_positions)
 
     border_colors = [
         "#0F172A" if i in selected_position_set else "#FFFFFF"
         for i in range(len(chart))
     ]
-
     border_widths = [
         3 if i in selected_position_set else 1
         for i in range(len(chart))
@@ -332,12 +344,12 @@ def show_graph(rows, scope, selectable):
                 "color": point_colors,
                 "line": {
                     "color": border_colors,
-                    "width": border_widths
-                }
+                    "width": border_widths,
+                },
             },
             line={
                 "width": 1.5,
-                "color": "#CBD5E1"
+                "color": "#CBD5E1",
             },
             customdata=chart[["record_id"]].values.tolist(),
             hovertext=[
@@ -354,12 +366,8 @@ def show_graph(rows, scope, selectable):
                 "%{hovertext}<extra></extra>"
             ),
             selectedpoints=selected_positions or None,
-            selected={
-                "marker": {
-                    "size": 17
-                }
-            },
-            unselected={"marker": {"opacity": 0.65}}
+            selected={"marker": {"size": 17}},
+            unselected={"marker": {"opacity": 0.65}},
         )
     )
 
@@ -375,24 +383,26 @@ def show_graph(rows, scope, selectable):
                 item.strftime(tick_date_format)
                 for item in ticks
             ],
-            "showgrid": False
+            "showgrid": False,
         },
         yaxis={
             "title": "혈당 (mg/dL)",
             "gridcolor": "#EEEEEE",
-            "rangemode": "tozero"
+            "rangemode": "tozero",
         },
         plot_bgcolor="white",
         paper_bgcolor="white",
         clickmode="event+select",
         dragmode="pan",
         showlegend=False,
-        uirevision=f"history_{scope}_{fingerprint(rows)}"
+        uirevision=f"history_{scope}_{fingerprint(rows)}",
     )
 
     st.caption(
-        "날짜는 하루에 한 번만 표시하고, 날짜가 많으면 일부만 표시해요. "
-        "각 점의 측정 시간은 점에 마우스를 올리면 확인할 수 있어요."
+        "날짜는 하루에 한 번만 표시하고, "
+        "날짜가 많으면 일부만 표시해요. "
+        "각 점의 측정 시간은 점에 마우스를 올리면 "
+        "확인할 수 있어요."
     )
 
     if label_mode == "숨기기":
@@ -418,7 +428,7 @@ def show_graph(rows, scope, selectable):
         st.plotly_chart(
             fig,
             use_container_width=True,
-            key=graph_key
+            key=graph_key,
         )
         show_meal_legend()
         return None
@@ -434,11 +444,10 @@ def show_graph(rows, scope, selectable):
         use_container_width=True,
         key=graph_key,
         on_select="rerun",
-        selection_mode="points"
+        selection_mode="points",
     )
 
     show_meal_legend()
-
     points = event["selection"]["points"]
 
     if len(points) != 1:
@@ -455,7 +464,7 @@ def show_graph(rows, scope, selectable):
             row for row in rows
             if str(row["record_id"]) == str(custom[0])
         ),
-        None
+        None,
     )
 
 
@@ -464,7 +473,6 @@ def edit_record(client, user, profile_id, row):
     user_timezone = get_user_timezone()
 
     st.markdown("### ✏️ 선택한 기록 수정·삭제")
-
     st.info(
         f"📅 {row['measure_date']} "
         f"{str(row['measure_time'])[:5]}  |  "
@@ -474,7 +482,8 @@ def edit_record(client, user, profile_id, row):
 
     prefix = (
         f"history_edit_{user.id}_{profile_id}_"
-        f"{row['record_id']}_{fingerprint(row)}_{timezone_name}"
+        f"{row['record_id']}_{fingerprint(row)}_"
+        f"{timezone_name}"
     )
 
     original_meal = row.get("meal") or "기타"
@@ -499,18 +508,17 @@ def edit_record(client, user, profile_id, row):
         edited_date = c1.date_input(
             "측정 날짜",
             value=min(original_date, today),
-            max_value=today
+            max_value=today,
         )
-
         edited_time = c2.time_input(
             "측정 시간",
             value=time.fromisoformat(row["measure_time"]),
-            step=60
+            step=60,
         )
 
         st.caption(
-            f"측정 날짜와 시간은 선택한 시간대({timezone_name}) 기준이에요. "
-            "현재보다 미래인 시각으로 수정할 수 없어요."
+            f"측정 날짜와 시간은 선택한 시간대({timezone_name}) "
+            "기준이에요. 현재보다 미래인 시각으로 수정할 수 없어요."
         )
 
         edited_glucose = st.number_input(
@@ -518,55 +526,55 @@ def edit_record(client, user, profile_id, row):
             min_value=1,
             max_value=1000,
             value=int(row["glucose"]),
-            step=1
+            step=1,
         )
 
         edited_meal = st.selectbox(
             "측정 시점",
             options,
-            index=options.index(original_meal)
+            index=options.index(original_meal),
         )
 
         edited_insulin = st.number_input(
             "인슐린 투여량 (단위)",
             min_value=0.0,
             value=float(row.get("insulin") or 0),
-            step=0.5
+            step=0.5,
         )
 
         edited_memo = st.text_area(
             "메모",
-            value=row.get("memo") or ""
+            value=row.get("memo") or "",
         )
 
         save = st.form_submit_button(
             "💾 수정 내용 저장",
-            use_container_width=True
+            use_container_width=True,
         )
 
     if save:
         measured_at = datetime.combine(
-            edited_date,
-            edited_time
+            edited_date, edited_time
         ).replace(tzinfo=user_timezone)
 
         current_time = get_local_now()
 
         round_trip = (
-            measured_at.astimezone(timezone.utc)
+            measured_at
+            .astimezone(timezone.utc)
             .astimezone(user_timezone)
             .replace(tzinfo=None)
         )
 
         entered_time = datetime.combine(
-            edited_date,
-            edited_time
+            edited_date, edited_time
         )
 
         if round_trip != entered_time:
             st.warning(
-                "선택한 시간대의 시계 전환으로 존재하지 않는 시각이에요. "
-                "실제로 측정한 날짜와 시간을 다시 확인해 주세요."
+                "선택한 시간대의 시계 전환으로 존재하지 않는 "
+                "시각이에요. 실제로 측정한 날짜와 시간을 "
+                "다시 확인해 주세요."
             )
 
         elif (
@@ -585,20 +593,23 @@ def edit_record(client, user, profile_id, row):
                 "glucose": edited_glucose,
                 "meal": edited_meal,
                 "insulin": edited_insulin,
-                "memo": edited_memo
+                "memo": edited_memo,
             }
 
             try:
                 changed = change_record(
-                    client, user.id, profile_id,
-                    row["record_id"], values
+                    client,
+                    user.id,
+                    profile_id,
+                    row["record_id"],
+                    values,
                 )
 
             except Exception as error:
                 show_error(
                     "수정 결과를 확인하지 못했어요. "
                     "목록을 새로 확인해 주세요.",
-                    error
+                    error,
                 )
 
             else:
@@ -606,10 +617,9 @@ def edit_record(client, user, profile_id, row):
                     st.session_state.history_notice = (
                         user.id,
                         profile_id,
-                        "혈당 기록을 수정했어요."
+                        "혈당 기록을 수정했어요.",
                     )
                     st.rerun()
-
                 else:
                     st.warning(
                         "변경된 기록이 없어요. "
@@ -628,7 +638,7 @@ def edit_record(client, user, profile_id, row):
 
         delete = st.form_submit_button(
             "🗑️ 선택한 기록 삭제",
-            use_container_width=True
+            use_container_width=True,
         )
 
     if delete:
@@ -638,15 +648,17 @@ def edit_record(client, user, profile_id, row):
         else:
             try:
                 changed = change_record(
-                    client, user.id, profile_id,
-                    row["record_id"]
+                    client,
+                    user.id,
+                    profile_id,
+                    row["record_id"],
                 )
 
             except Exception as error:
                 show_error(
                     "삭제 결과를 확인하지 못했어요. "
                     "목록을 새로 확인해 주세요.",
-                    error
+                    error,
                 )
 
             else:
@@ -654,10 +666,9 @@ def edit_record(client, user, profile_id, row):
                     st.session_state.history_notice = (
                         user.id,
                         profile_id,
-                        "혈당 기록을 삭제했어요."
+                        "혈당 기록을 삭제했어요.",
                     )
                     st.rerun()
-
                 else:
                     st.warning(
                         "삭제된 기록이 없어요. "
@@ -668,12 +679,15 @@ def edit_record(client, user, profile_id, row):
 st.set_page_config(
     page_title="기록 확인·수정 | 당당케어",
     page_icon="📈",
-    layout="wide"
+    layout="wide",
 )
 
-st.markdown("""
+st.markdown(
+    """
 <style>
-.stApp { background-color: #FFF9F9; }
+.stApp {
+    background-color: #FFF9F9;
+}
 
 div.stButton > button {
     border-radius: 14px;
@@ -686,30 +700,24 @@ div[data-testid="stForm"] {
     border: 1px solid #EEEEEE;
 }
 </style>
-""", unsafe_allow_html=True)
-
+""",
+    unsafe_allow_html=True,
+)
 
 profile_menu = show_sidebar_menu("pages/history.py")
-
-
-# 로그인 확인
 client, user = require_login()
 timezone_name = get_timezone_name()
 
 st.title("📈 기록 확인·수정")
-
 st.caption(
     "관리 대상별 혈당 기록을 조회하고, "
     "원하는 기록을 찾아 수정하거나 삭제해요."
 )
-
 st.caption(
     f"조회 기간과 수정 시각 기준: {timezone_name}. "
     "표와 그래프에는 저장된 측정 날짜·시간을 표시해요."
 )
 
-
-# 관리 대상 조회
 try:
     profiles = (
         client.table("care_profiles")
@@ -726,58 +734,40 @@ except Exception as error:
 
 if not profiles:
     st.info(
-        "먼저 혈당 기록하기 페이지에서 "
-        "관리 대상을 등록해 주세요."
+        "먼저 혈당 기록하기 페이지에서 관리 대상을 등록해 주세요."
     )
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
-        icon="➕"
+        icon="➕",
     )
     st.stop()
 
 profile_map = {
-    item["id"]: item
-    for item in profiles
+    item["id"]: item for item in profiles
 }
 
 if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
-
-# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
     for item in profiles:
-        icon = (
-            "👤"
-            if item["profile_type"] == "사람"
-            else "🐾"
-        )
-
-        kind = (
-            item.get("animal_type")
-            or item["profile_type"]
-        )
-
+        icon = "👤" if item["profile_type"] == "사람" else "🐾"
+        kind = item.get("animal_type") or item["profile_type"]
         label = f"{icon} {item['name']} · {kind}"
 
-        if sum(
-            p["name"] == item["name"]
-            for p in profiles
-        ) > 1:
+        if sum(p["name"] == item["name"] for p in profiles) > 1:
             label += f" · {item['id'][:8]}"
 
-        active = (
-            item["id"] == st.session_state.active_profile
-        )
+        active = item["id"] == st.session_state.active_profile
 
         if st.button(
             label,
             key=f"history_profile_{user.id}_{item['id']}",
             type="primary" if active else "secondary",
-            use_container_width=True
+            use_container_width=True,
         ):
             st.session_state.active_profile = item["id"]
             st.rerun()
@@ -785,10 +775,7 @@ with profile_menu:
 profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
 
-# 기록 관련 상태는 기존 계정·대상 기준을 유지해요.
 scope = f"{user.id}_{profile_id}"
-
-# 날짜 입력과 선택 화면은 시간대가 바뀌면 새로 생성해요.
 ui_scope = f"{scope}_{timezone_name}"
 
 st.subheader(f"{profile['name']}의 혈당 기록")
@@ -800,8 +787,6 @@ if notice and notice[:2] == (user.id, profile_id):
 
 today = get_local_now().date()
 
-
-# 혈당 기록 전체 초기화
 st.divider()
 
 with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
@@ -813,7 +798,7 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
             .select(
                 "record_id",
                 count="exact",
-                head=True
+                head=True,
             )
             .eq("user_id", user.id)
             .eq("profile_id", profile_id)
@@ -821,20 +806,22 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
         )
 
         if count_result.count is None:
-            raise ValueError("혈당 기록 수를 확인하지 못했어요.")
+            raise ValueError(
+                "혈당 기록 수를 확인하지 못했어요."
+            )
 
         reset_count = count_result.count
 
     except Exception as error:
         show_error(
             "초기화할 혈당 기록 수를 확인하지 못했어요.",
-            error
+            error,
         )
 
     if reset_count is not None:
         st.warning(
-            f"‘{profile['name']}’의 혈당 기록 "
-            f"{reset_count}건을 날짜와 관계없이 모두 삭제해요. "
+            f"‘{profile['name']}’의 혈당 기록 {reset_count}건을 "
+            "날짜와 관계없이 모두 삭제해요. "
             "삭제한 기록은 앱에서 복구할 수 없어요."
         )
 
@@ -845,7 +832,6 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
         )
 
         st.caption(
-            "삭제할 혈당에 연결된 식사·활동의 연결 정보도 사라져요. "
             "진료 노트에 골라둔 혈당은 삭제 후 조회할 수 없고, "
             "혈당 통계와 그래프에서도 제외돼요."
         )
@@ -862,18 +848,20 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
 
         with st.form(reset_form_key):
             confirm_reset = st.checkbox(
-                "선택한 대상의 혈당 기록 전체가 삭제되는 것을 확인했어요."
+                "선택한 대상의 혈당 기록 전체가 "
+                "삭제되는 것을 확인했어요."
             )
 
             reset_name = st.text_input(
-                "확인을 위해 현재 관리 대상 이름을 그대로 입력해 주세요.",
-                help=f"입력할 이름: {profile['name']}"
+                "확인을 위해 현재 관리 대상 이름을 "
+                "그대로 입력해 주세요.",
+                help=f"입력할 이름: {profile['name']}",
             )
 
             reset_clicked = st.form_submit_button(
                 "🗑️ 이 대상의 혈당 기록 전체 삭제",
                 use_container_width=True,
-                disabled=reset_count == 0
+                disabled=reset_count == 0,
             )
 
         if reset_count == 0:
@@ -881,7 +869,9 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
 
         if reset_clicked:
             if not confirm_reset:
-                st.warning("전체 삭제 확인란을 먼저 체크해 주세요.")
+                st.warning(
+                    "전체 삭제 확인란을 먼저 체크해 주세요."
+                )
 
             elif reset_name.strip() != profile["name"]:
                 st.warning(
@@ -903,7 +893,7 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
                         .select(
                             "record_id",
                             count="exact",
-                            head=True
+                            head=True,
                         )
                         .eq("user_id", user.id)
                         .eq("profile_id", profile_id)
@@ -923,46 +913,41 @@ with st.expander("🗑️ 선택한 대상의 혈당 기록 전체 초기화"):
 
                 except Exception as error:
                     st.session_state.pop(
-                        f"care_record_context_{scope}",
-                        None
+                        f"care_record_context_{scope}", None
                     )
                     st.session_state.pop(
-                        f"record_ai_result_{scope}",
-                        None
+                        f"record_ai_result_{scope}", None
                     )
 
                     show_error(
                         "전체 삭제 결과를 확인하지 못했어요. "
                         "기록 확인·수정 페이지에서 "
                         "남은 기록을 확인해 주세요.",
-                        error
+                        error,
                     )
 
                 else:
                     st.session_state.pop(
-                        f"care_record_context_{scope}",
-                        None
+                        f"care_record_context_{scope}", None
                     )
                     st.session_state.pop(
-                        f"record_ai_result_{scope}",
-                        None
+                        f"record_ai_result_{scope}", None
                     )
 
                     st.session_state.history_notice = (
                         user.id,
                         profile_id,
-                        f"{profile['name']}의 혈당 기록을 모두 삭제했어요."
+                        f"{profile['name']}의 혈당 기록을 "
+                        "모두 삭제했어요.",
                     )
                     st.rerun()
 
-
-# 조회 기간 선택
 period = st.radio(
     "조회 기간",
     ["오늘", "최근 7일", "최근 30일", "직접 설정"],
     index=1,
     horizontal=True,
-    key=f"history_period_{ui_scope}"
+    key=f"history_period_{ui_scope}",
 )
 
 if period == "직접 설정":
@@ -971,20 +956,19 @@ if period == "직접 설정":
     start = c1.date_input(
         "조회 시작일",
         value=today - timedelta(days=90),
-        key=f"history_start_{ui_scope}"
+        key=f"history_start_{ui_scope}",
     )
-
     end = c2.date_input(
         "조회 종료일",
         value=today,
-        key=f"history_end_{ui_scope}"
+        key=f"history_end_{ui_scope}",
     )
 
 else:
     days = {
         "오늘": 1,
         "최근 7일": 7,
-        "최근 30일": 30
+        "최근 30일": 30,
     }[period]
 
     start = today - timedelta(days=days - 1)
@@ -1001,14 +985,12 @@ if start > end:
 meal = st.selectbox(
     "측정 시점으로 찾기",
     ["전체"] + MEALS,
-    key=f"history_meal_filter_{ui_scope}"
+    key=f"history_meal_filter_{ui_scope}",
 )
 
-
-# 기록 수정·삭제 모드
 editing = st.toggle(
     "✏️ 기록 수정·삭제",
-    key=f"history_editing_{ui_scope}"
+    key=f"history_editing_{ui_scope}",
 )
 
 method = None
@@ -1019,17 +1001,11 @@ memo = ""
 if editing:
     method = st.radio(
         "기록을 찾는 방법",
-        [
-            "그래프에서 선택",
-            "검색해서 찾기",
-            "표에서 선택"
-        ],
+        ["그래프에서 선택", "검색해서 찾기", "표에서 선택"],
         horizontal=True,
-        key=f"history_method_{ui_scope}"
+        key=f"history_method_{ui_scope}",
     )
 
-
-# 검색 조건
 if method == "검색해서 찾기":
     st.caption(
         "위의 조회 기간·측정 시점 안에서 검색해요. "
@@ -1038,19 +1014,19 @@ if method == "검색해서 찾기":
 
     use_date = st.checkbox(
         "특정 날짜로 찾기",
-        key=f"history_use_date_{ui_scope}"
+        key=f"history_use_date_{ui_scope}",
     )
 
     picked_date = st.date_input(
         "찾을 날짜",
         value=end,
         disabled=not use_date,
-        key=f"history_search_date_{ui_scope}"
+        key=f"history_search_date_{ui_scope}",
     )
 
     use_time = st.checkbox(
         "시간대로 찾기",
-        key=f"history_use_time_{ui_scope}"
+        key=f"history_use_time_{ui_scope}",
     )
 
     c1, c2 = st.columns(2)
@@ -1060,7 +1036,7 @@ if method == "검색해서 찾기":
         value=time(0, 0),
         step=60,
         disabled=not use_time,
-        key=f"history_from_time_{ui_scope}"
+        key=f"history_from_time_{ui_scope}",
     )
 
     to_time = c2.time_input(
@@ -1068,13 +1044,13 @@ if method == "검색해서 찾기":
         value=time(23, 59),
         step=60,
         disabled=not use_time,
-        key=f"history_to_time_{ui_scope}"
+        key=f"history_to_time_{ui_scope}",
     )
 
     memo = st.text_input(
         "메모에 포함된 단어",
         placeholder="예: 산책, 아침, 간식",
-        key=f"history_memo_search_{ui_scope}"
+        key=f"history_memo_search_{ui_scope}",
     )
 
     if not (use_date or use_time or memo.strip()):
@@ -1103,8 +1079,6 @@ if method == "검색해서 찾기":
 
         time_range = (from_time, to_time)
 
-
-# 기록 불러오기
 try:
     rows = load_records(
         client,
@@ -1115,7 +1089,7 @@ try:
         meal,
         search_date,
         time_range,
-        memo
+        memo,
     )
 
 except Exception as error:
@@ -1134,124 +1108,49 @@ st.caption(
     "더 오래된 기록은 조회 기간을 좁혀 찾아 주세요."
 )
 
-
-# 기록 요약
 c1, c2 = st.columns(2)
-
-c1.metric(
-    "표시된 기록",
-    f"{len(rows)}개"
-)
-
+c1.metric("표시된 기록", f"{len(rows)}개")
 c2.metric(
     "조회 결과의 최근 혈당",
-    f"{rows[0]['glucose']} mg/dL"
+    f"{rows[0]['glucose']} mg/dL",
 )
 
-
-# 그래프
 selected = show_graph(
     rows,
     ui_scope,
     selectable=(
-        editing
-        and method == "그래프에서 선택"
-    )
+        editing and method == "그래프에서 선택"
+    ),
 )
 
-
-# 표 또는 검색 결과에서 선택
 if editing and method in ["검색해서 찾기", "표에서 선택"]:
     st.markdown(
         "### 🔎 검색 결과"
         if method == "검색해서 찾기"
         else "### 📋 표에서 기록 선택"
     )
-    selected = select_from_table(
-        rows,
-        ui_scope
-    )
+    selected = select_from_table(rows, ui_scope)
 
 else:
     st.markdown("### 📋 기록 목록")
     st.dataframe(
         display_records(rows),
         hide_index=True,
-        use_container_width=True
+        use_container_width=True,
     )
 
-
-# 선택한 기록 수정·삭제
 if editing and selected is not None:
     edit_record(
-        client,
-        user,
-        profile_id,
-        selected
+        client, user, profile_id, selected
     )
 
-
-# 혈당에 연결된 식사·활동 조회
-st.divider()
-
-with st.expander("🔗 혈당에 연결된 식사·활동 보기"):
-    st.caption(
-        "현재 조회된 혈당 중 한 건을 선택해 "
-        "연결된 식사·활동을 확인해요. "
-        "기록 수정 모드를 켜지 않아도 이용할 수 있어요."
-    )
-
-    related_map = {
-        str(row["record_id"]): row
-        for row in rows
-    }
-
-    related_choice_key = (
-        f"history_related_choice_{ui_scope}"
-    )
-
-    if st.session_state.get(related_choice_key) not in related_map:
-        st.session_state[related_choice_key] = next(iter(related_map))
-
-    def related_blood_label(record_id):
-        row = related_map[record_id]
-
-        return (
-            f"{row['measure_date']} "
-            f"{str(row['measure_time'])[:5]} · "
-            f"{row['glucose']} mg/dL · "
-            f"{row.get('meal') or '미입력'} · "
-            f"{record_id[:8]}"
-        )
-
-    related_choice = st.selectbox(
-        "관련 식사·활동을 확인할 혈당",
-        list(related_map),
-        format_func=related_blood_label,
-        key=related_choice_key
-    )
-
-    related_blood = related_map[related_choice]
-
-    show_linked_records(
-        client=client,
-        user_id=user.id,
-        profile_id=profile_id,
-        glucose_id=related_blood["record_id"]
-    )
-
-
-# CSV 다운로드
 filename_profile = safe_filename_part(profile["name"])
-
 download_filename = (
     f"blood_glucose_{filename_profile}_"
     f"{start:%Y%m%d}_{end:%Y%m%d}.csv"
 )
 
-st.caption(
-    f"다운로드 파일명: {download_filename}"
-)
+st.caption(f"다운로드 파일명: {download_filename}")
 
 st.download_button(
     "📥 표시된 기록 CSV 다운로드",
@@ -1260,5 +1159,5 @@ st.download_button(
     ).encode("utf-8-sig"),
     file_name=download_filename,
     mime="text/csv",
-    key=f"history_download_{ui_scope}"
+    key=f"history_download_{ui_scope}",
 )
