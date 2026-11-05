@@ -127,15 +127,12 @@ def display_records(rows):
 
 
 def format_minutes(minutes):
-    minutes = int(minutes)
-    hours, remaining = divmod(minutes, 60)
+    hours, remaining = divmod(int(minutes), 60)
 
     if hours and remaining:
         return f"{hours}시간 {remaining}분"
-
     if hours:
         return f"{hours}시간"
-
     return f"{remaining}분"
 
 
@@ -190,16 +187,12 @@ def show_record_summary(rows, start, end, kind_filter):
             for row in activities
         )
 
-        activity_value = (
-            format_minutes(activity_minutes)
-            if activities
-            else "기록 없음"
-        )
-
         metrics.append(
             (
                 "🏃 총 활동 시간",
-                activity_value,
+                format_minutes(activity_minutes)
+                if activities
+                else "기록 없음",
                 "저장된 운동·산책 시간의 합계예요. "
                 "같은 시간대에 중복 저장한 기록도 각각 포함돼요.",
             )
@@ -263,6 +256,182 @@ def show_record_summary(rows, start, end, kind_filter):
     st.caption(
         "기록이 없는 날짜를 식사·활동·수면이 없었던 날로 "
         "계산하지 않아요."
+    )
+    st.divider()
+
+
+def show_meal_calendar(rows, start, end, ui_scope):
+    meals = [
+        row for row in rows
+        if row["record_type"] == "meal"
+    ]
+
+    st.markdown("### 🍽️ 날짜별 식사 기록")
+
+    if not meals:
+        st.info("선택한 기간에 표시할 식사 기록이 없어요.")
+        return
+
+    months = sorted(
+        {row["record_date"][:7] for row in meals},
+        reverse=True,
+    )
+
+    selected_month = st.selectbox(
+        "식사 기록을 볼 월",
+        months,
+        format_func=lambda value: (
+            f"{value[:4]}년 {int(value[5:7])}월"
+        ),
+        key=f"meal_calendar_month_{ui_scope}_{start}_{end}",
+    )
+
+    first_day = date.fromisoformat(selected_month + "-01")
+    next_month = (
+        first_day.replace(day=28) + timedelta(days=4)
+    ).replace(day=1)
+
+    visible_start = max(start, first_day)
+    visible_end = min(end, next_month - timedelta(days=1))
+
+    grouped = {}
+
+    for row in meals:
+        slot = row.get("meal_slot") or "기타"
+
+        if slot not in MEAL_SLOTS:
+            slot = "기타"
+
+        grouped.setdefault(
+            (row["record_date"], slot), []
+        ).append(row)
+
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+    chart_rows = []
+    day_labels = []
+    current_day = visible_start
+
+    while current_day <= visible_end:
+        label = (
+            f"{current_day:%m/%d} "
+            f"({weekdays[current_day.weekday()]})"
+        )
+        day_labels.append(label)
+
+        for slot in MEAL_SLOTS:
+            items = grouped.get(
+                (current_day.isoformat(), slot), []
+            )
+            descriptions = []
+
+            for item in items:
+                name = item.get("item_name") or "이름 없는 음식"
+                amount = item.get("amount")
+                unit = item.get("amount_unit") or ""
+                clock = str(item.get("record_time") or "")[:5]
+
+                amount_text = (
+                    f" {float(amount):g} {unit}"
+                    if amount is not None
+                    else ""
+                )
+
+                descriptions.append(
+                    f"{clock} {name}{amount_text}".strip()
+                )
+
+            chart_rows.append(
+                {
+                    "날짜": current_day.isoformat(),
+                    "날짜 표시": label,
+                    "식사 구분": slot,
+                    "상태": "기록 있음" if items else "기록 없음",
+                    "음식 기록 수": len(items),
+                    "음식 목록": (
+                        " / ".join(descriptions)
+                        if items
+                        else "저장된 기록이 없어요."
+                    ),
+                }
+            )
+
+        current_day += timedelta(days=1)
+
+    st.caption(
+        "주황색은 식사 기록이 있는 칸, "
+        "회색은 기록이 없는 칸이에요. "
+        "칸에 커서를 올리면 음식·섭취량·입력 시각을 "
+        "확인할 수 있어요."
+    )
+
+    st.vega_lite_chart(
+        pd.DataFrame(chart_rows),
+        {
+            "mark": {
+                "type": "rect",
+                "cornerRadius": 5,
+                "stroke": "white",
+                "strokeWidth": 3,
+            },
+            "height": {"step": 25},
+            "encoding": {
+                "x": {
+                    "field": "식사 구분",
+                    "type": "ordinal",
+                    "sort": MEAL_SLOTS,
+                    "axis": {
+                        "title": None,
+                        "orient": "top",
+                        "labelAngle": 0,
+                        "labelFontSize": 13,
+                    },
+                },
+                "y": {
+                    "field": "날짜 표시",
+                    "type": "ordinal",
+                    "sort": day_labels,
+                    "axis": {
+                        "title": None,
+                        "labelFontSize": 12,
+                    },
+                },
+                "color": {
+                    "field": "상태",
+                    "type": "nominal",
+                    "scale": {
+                        "domain": ["기록 없음", "기록 있음"],
+                        "range": ["#ECEFF3", "#F5A65B"],
+                    },
+                    "legend": {
+                        "title": None,
+                        "orient": "bottom",
+                    },
+                },
+                "tooltip": [
+                    {"field": "날짜", "type": "nominal"},
+                    {"field": "식사 구분", "type": "nominal"},
+                    {"field": "상태", "type": "nominal"},
+                    {
+                        "field": "음식 기록 수",
+                        "type": "quantitative",
+                        "format": "d",
+                    },
+                    {"field": "음식 목록", "type": "nominal"},
+                ],
+            },
+            "config": {
+                "view": {"stroke": None},
+            },
+        },
+        use_container_width=True,
+    )
+
+    st.caption(
+        "조회 기간 안에서 식사 기록이 있는 월만 "
+        "선택 목록에 표시해요. "
+        "음식 여러 개를 저장해도 같은 날짜·식사 구분은 "
+        "한 칸으로 표시해요. "
+        "회색은 식사를 거르거나 먹지 않았다는 뜻이 아니에요."
     )
     st.divider()
 
@@ -781,7 +950,6 @@ elif record_type == "sleep":
         "잠든 날짜·시간과 일어난 날짜·시간을 입력해요. "
         "기록 날짜는 잠들기 시작한 날짜로 저장돼요."
     )
-
     st.info(
         "밤 12시(자정)는 24:00이 아니라 "
         "다음 날 00:00으로 입력해 주세요. "
@@ -851,7 +1019,6 @@ with st.form(form_key):
                 key=f"{form_key}_food_{index}",
                 placeholder="예: 현미밥 또는 사료 제품명",
             )
-
             amount = c2.number_input(
                 "먹은 양",
                 min_value=0.0,
@@ -859,7 +1026,6 @@ with st.form(form_key):
                 step=0.5,
                 key=f"{form_key}_amount_{index}",
             )
-
             unit = c3.selectbox(
                 "단위",
                 UNITS,
@@ -908,7 +1074,6 @@ with st.form(form_key):
         "보충 메모(선택)",
         placeholder="추가로 남길 내용이 있을 때만 입력해 주세요.",
     )
-
     submitted = st.form_submit_button(
         "💾 기록 저장",
         use_container_width=True,
@@ -948,8 +1113,7 @@ if submitted:
                 for name, amount, unit in foods
             ):
                 raise ValueError(
-                    "모든 음식의 이름과 0보다 큰 섭취량을 "
-                    "입력해 주세요."
+                    "모든 음식의 이름과 0보다 큰 섭취량을 입력해 주세요."
                 )
 
             payload = [
@@ -983,8 +1147,7 @@ if submitted:
                 )
 
             next_midnight = datetime.combine(
-                record_date + timedelta(days=1),
-                time(0, 0),
+                record_date + timedelta(days=1), time(0, 0)
             )
 
             if ended > next_midnight:
@@ -1003,9 +1166,7 @@ if submitted:
 
         elif record_type == "sleep":
             ended = datetime.combine(wake_date, wake_time)
-            minutes = int(
-                (ended - started).total_seconds() // 60
-            )
+            minutes = int((ended - started).total_seconds() // 60)
 
             if minutes <= 0:
                 raise ValueError(
@@ -1027,9 +1188,7 @@ if submitted:
 
         else:
             if not confirmed:
-                raise ValueError(
-                    "활동 없음 확인란을 체크해 주세요."
-                )
+                raise ValueError("활동 없음 확인란을 체크해 주세요.")
 
             if record_date >= today:
                 raise ValueError(
@@ -1092,7 +1251,6 @@ start = c1.date_input(
     value=today - timedelta(days=6),
     key=f"lifestyle_start_{ui_scope}",
 )
-
 end = c2.date_input(
     "조회 종료일",
     value=today,
@@ -1145,6 +1303,9 @@ if not rows:
     st.stop()
 
 show_record_summary(rows, start, end, kind_filter)
+
+if kind_filter in ["전체", "식사"]:
+    show_meal_calendar(rows, start, end, ui_scope)
 
 st.markdown("### 📋 상세 기록 확인·수정")
 st.caption(
@@ -1201,11 +1362,9 @@ if positions and 0 <= positions[0] < len(rows):
             "선택한 한 행을 삭제해요. "
             "삭제한 기록은 앱에서 복구할 수 없어요."
         )
-
         confirm_delete = st.checkbox(
             "선택한 기록의 삭제를 확인했어요."
         )
-
         delete_clicked = st.form_submit_button(
             "🗑️ 선택한 기록 삭제"
         )
@@ -1240,7 +1399,6 @@ if positions and 0 <= positions[0] < len(rows):
                         "선택한 기록을 삭제했어요.",
                     )
                     st.rerun()
-
                 else:
                     st.warning(
                         "삭제된 기록이 없어요. "
