@@ -9,7 +9,7 @@ import streamlit as st
 from app_shared import (
     require_login,
     get_timezone_name,
-    get_local_now
+    get_local_now,
 )
 from meal_ai import show_meal_recommendations
 from sidebar_menu import show_sidebar_menu
@@ -17,7 +17,7 @@ from sidebar_menu import show_sidebar_menu
 
 UNITS = [
     "g", "kg", "mL", "L",
-    "개", "장", "봉", "팩", "컵", "공기"
+    "개", "장", "봉", "팩", "컵", "공기",
 ]
 
 RESET_OPTIONS = {
@@ -32,7 +32,7 @@ def fingerprint(value):
         json.dumps(
             value,
             sort_keys=True,
-            default=str
+            default=str,
         ).encode()
     ).hexdigest()[:16]
 
@@ -60,9 +60,7 @@ def parse_expiry(value):
 
 def expiry_info(item, today):
     try:
-        expiry = parse_expiry(
-            item.get("expiry_date")
-        )
+        expiry = parse_expiry(item.get("expiry_date"))
 
     except (ValueError, TypeError):
         return None, "⚠️ 날짜 확인 필요", False
@@ -73,11 +71,7 @@ def expiry_info(item, today):
     remaining = (expiry - today).days
 
     if remaining < 0:
-        return (
-            expiry,
-            f"🔴 기한 지남 · {-remaining}일 경과",
-            False
-        )
+        return expiry, f"🔴 기한 지남 · {-remaining}일 경과", False
 
     if remaining == 0:
         return expiry, "🟠 오늘까지", True
@@ -87,9 +81,7 @@ def expiry_info(item, today):
 
 def expiry_for_editor(item):
     try:
-        return parse_expiry(
-            item.get("expiry_date")
-        )
+        return parse_expiry(item.get("expiry_date"))
 
     except (ValueError, TypeError):
         return None
@@ -100,9 +92,7 @@ def clean_ingredients(rows):
     seen = set()
 
     for index, row in enumerate(rows, start=1):
-        name = str(
-            row.get("재료명") or ""
-        ).strip()
+        name = str(row.get("재료명") or "").strip()
 
         raw_amount = row.get("보유량")
         amount = (
@@ -111,9 +101,7 @@ def clean_ingredients(rows):
             else float(raw_amount)
         )
 
-        unit = str(
-            row.get("단위") or ""
-        ).strip()
+        unit = str(row.get("단위") or "").strip()
 
         try:
             expiry = parse_expiry(
@@ -125,11 +113,7 @@ def clean_ingredients(rows):
                 f"{index}행의 유통·소비기한을 확인해 주세요."
             )
 
-        if (
-            not name
-            and amount is None
-            and expiry is None
-        ):
+        if not name and amount is None and expiry is None:
             continue
 
         if not name:
@@ -167,7 +151,7 @@ def clean_ingredients(rows):
                 expiry.isoformat()
                 if expiry
                 else None
-            )
+            ),
         })
 
     return result
@@ -187,7 +171,7 @@ def read_fridge(client, user_id):
 
 
 def collect_legacy_ingredients(client, user_id):
-    # 기존 대상별 재료는 복사만 하고 원본은 삭제하지 않아요.
+    # 기존 대상별 재료는 복사하고 원본은 유지해요.
     merged = {}
     conflicts = set()
     offset = 0
@@ -213,7 +197,6 @@ def collect_legacy_ingredients(client, user_id):
                     continue
 
                 key = name.casefold()
-
                 expiry = parse_expiry(
                     item.get("expiry_date")
                 )
@@ -226,7 +209,7 @@ def collect_legacy_ingredients(client, user_id):
                         expiry.isoformat()
                         if expiry
                         else None
-                    )
+                    ),
                 }
 
                 if key not in merged:
@@ -235,17 +218,14 @@ def collect_legacy_ingredients(client, user_id):
                 else:
                     if (
                         merged[key]["amount"],
-                        merged[key]["unit"]
+                        merged[key]["unit"],
                     ) != (
                         candidate["amount"],
-                        candidate["unit"]
+                        candidate["unit"],
                     ):
-                        # 중복 입력된 재고일 수 있어 합산하지 않아요.
                         merged[key]["amount"] = None
                         merged[key]["unit"] = ""
-                        conflicts.add(
-                            merged[key]["name"]
-                        )
+                        conflicts.add(merged[key]["name"])
 
                     if (
                         merged[key].get("expiry_date")
@@ -255,7 +235,7 @@ def collect_legacy_ingredients(client, user_id):
                             value
                             for value in [
                                 merged[key].get("expiry_date"),
-                                candidate["expiry_date"]
+                                candidate["expiry_date"],
                             ]
                             if value
                         ]
@@ -266,9 +246,7 @@ def collect_legacy_ingredients(client, user_id):
                             else None
                         )
 
-                        conflicts.add(
-                            merged[key]["name"]
-                        )
+                        conflicts.add(merged[key]["name"])
 
         if len(rows) < 1000:
             break
@@ -283,7 +261,7 @@ def save_conditions(
     user_id,
     profile_id,
     values,
-    has_settings
+    has_settings,
 ):
     payload = {
         "user_id": user_id,
@@ -298,14 +276,14 @@ def save_conditions(
     client.table("meal_settings").upsert(
         payload,
         on_conflict="profile_id",
-        returning="minimal"
+        returning="minimal",
     ).execute()
 
 
 st.set_page_config(
     page_title="냉장고 식단 추천 | 당당케어",
     page_icon="🍽️",
-    layout="wide"
+    layout="wide",
 )
 
 st.markdown("""
@@ -334,7 +312,7 @@ client, user = require_login()
 timezone_name = get_timezone_name()
 
 
-# 관리 대상 불러오기
+# 관리 대상 조회
 try:
     profiles = (
         client.table("care_profiles")
@@ -348,7 +326,7 @@ try:
 except Exception as error:
     show_error(
         "관리 대상 목록을 불러오지 못했어요.",
-        error
+        error,
     )
     st.stop()
 
@@ -380,7 +358,7 @@ if not profiles:
     st.page_link(
         "pages/record.py",
         label="관리 대상 등록하러 가기",
-        icon="➕"
+        icon="➕",
     )
 
     st.stop()
@@ -395,7 +373,7 @@ if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
 
-# 관리 대상 선택
+# 사이드바 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
@@ -428,7 +406,7 @@ with profile_menu:
             label,
             key=f"meal_profile_{user.id}_{item['id']}",
             type="primary" if active else "secondary",
-            use_container_width=True
+            use_container_width=True,
         ):
             st.session_state.active_profile = item["id"]
             st.rerun()
@@ -438,11 +416,10 @@ profile_id = st.session_state.active_profile
 profile = profile_map[profile_id]
 
 scope = f"{user.id}_{profile_id}"
-
 is_person = profile["profile_type"] == "사람"
 
 
-# 공유 냉장고와 현재 대상의 식사 조건 불러오기
+# 공유 냉장고·현재 대상 식사 조건 조회
 try:
     fridge = read_fridge(client, user.id)
 
@@ -464,7 +441,7 @@ except Exception as error:
     show_error(
         "공유 냉장고 또는 식사 조건을 불러오지 못했어요. "
         "공유 냉장고 SQL 실행 여부도 확인해 주세요.",
-        error
+        error,
     )
     st.stop()
 
@@ -473,7 +450,7 @@ settings = saved_rows[0] if saved_rows else {}
 
 notice = st.session_state.pop(
     f"meal_notice_{user.id}",
-    None
+    None,
 )
 
 if notice:
@@ -499,26 +476,24 @@ if fridge is None:
 
     if st.button(
         "🧊 기존 재료를 합쳐 공유 냉장고 만들기",
-        type="primary"
+        type="primary",
     ):
         try:
-            ingredients, conflicts = (
-                collect_legacy_ingredients(
-                    client,
-                    user.id
-                )
+            ingredients, conflicts = collect_legacy_ingredients(
+                client,
+                user.id,
             )
 
             client.table("family_fridges").insert({
                 "user_id": user.id,
-                "ingredients": ingredients
+                "ingredients": ingredients,
             }).execute()
 
         except Exception as error:
             show_error(
                 "공유 냉장고 생성 결과를 확인하지 못했어요. "
                 "페이지를 다시 열어 확인해 주세요.",
-                error
+                error,
             )
 
         else:
@@ -540,7 +515,7 @@ if fridge is None:
 
 conflicts = st.session_state.get(
     f"meal_import_conflicts_{user.id}",
-    []
+    [],
 )
 
 if conflicts:
@@ -557,12 +532,11 @@ if conflicts:
 
 
 saved_ingredients = fridge.get("ingredients") or []
-
 fridge_revision = fingerprint(fridge)
 
 revision = fingerprint({
     "settings": settings,
-    "fridge": fridge
+    "fridge": fridge,
 })
 
 
@@ -579,7 +553,7 @@ ingredient_rows = [
         "재료명": item.get("name") or "",
         "보유량": item.get("amount"),
         "단위": item.get("unit") or None,
-        "유통·소비기한": expiry_for_editor(item)
+        "유통·소비기한": expiry_for_editor(item),
     }
     for item in saved_ingredients
 ]
@@ -589,7 +563,7 @@ if not ingredient_rows:
         "재료명": "",
         "보유량": None,
         "단위": "g",
-        "유통·소비기한": None
+        "유통·소비기한": None,
     }]
 
 ingredient_df = pd.DataFrame(
@@ -598,8 +572,8 @@ ingredient_df = pd.DataFrame(
         "재료명",
         "보유량",
         "단위",
-        "유통·소비기한"
-    ]
+        "유통·소비기한",
+    ],
 )
 
 ingredient_df["재료명"] = (
@@ -608,7 +582,7 @@ ingredient_df["재료명"] = (
 
 ingredient_df["보유량"] = pd.to_numeric(
     ingredient_df["보유량"],
-    errors="coerce"
+    errors="coerce",
 ).astype(float)
 
 ingredient_df["단위"] = (
@@ -617,7 +591,7 @@ ingredient_df["단위"] = (
 
 ingredient_df["유통·소비기한"] = pd.to_datetime(
     ingredient_df["유통·소비기한"],
-    errors="coerce"
+    errors="coerce",
 ).dt.date
 
 
@@ -639,18 +613,18 @@ with st.form(
             "재료명": st.column_config.TextColumn(
                 "재료명",
                 help="예: 달걀, 두부, 양배추",
-                max_chars=80
+                max_chars=80,
             ),
             "보유량": st.column_config.NumberColumn(
                 "보유량",
                 help="양을 모르면 비워 두세요.",
                 min_value=0.0,
-                step=0.5
+                step=0.5,
             ),
             "단위": st.column_config.SelectboxColumn(
                 "단위",
                 options=UNITS,
-                default="g"
+                default="g",
             ),
             "유통·소비기한": st.column_config.DateColumn(
                 "유통·소비기한",
@@ -659,13 +633,13 @@ with st.form(
                     "포장에 적힌 유통기한 또는 소비기한을 "
                     "입력해요. 모르면 비워 두세요."
                 ),
-                required=False
-            )
+                required=False,
+            ),
         },
         key=(
             f"family_fridge_editor_"
             f"{user.id}_{fridge_revision}"
-        )
+        ),
     )
 
     st.caption(
@@ -676,7 +650,7 @@ with st.form(
 
     save_fridge_clicked = st.form_submit_button(
         "💾 공유 냉장고 재료 저장",
-        use_container_width=True
+        use_container_width=True,
     )
 
 
@@ -684,7 +658,7 @@ if save_fridge_clicked:
     try:
         clean_df = edited_ingredients.astype(object).where(
             pd.notna(edited_ingredients),
-            None
+            None,
         )
 
         ingredients = clean_ingredients(
@@ -695,7 +669,7 @@ if save_fridge_clicked:
             client.table("family_fridges")
             .update(
                 {"ingredients": ingredients},
-                returning="representation"
+                returning="representation",
             )
             .eq("user_id", user.id)
             .execute()
@@ -713,13 +687,13 @@ if save_fridge_clicked:
         show_error(
             "저장 결과를 확인하지 못했어요. "
             "페이지를 다시 열어 확인해 주세요.",
-            error
+            error,
         )
 
     else:
         st.session_state.pop(
             f"meal_import_conflicts_{user.id}",
-            None
+            None,
         )
 
         st.session_state[
@@ -733,10 +707,14 @@ if save_fridge_clicked:
 
 
 # 현재 대상의 식사 조건
-st.subheader(f"⚙️ {profile['name']}의 식사 조건")
+st.subheader(
+    f"⚙️ {profile['name']}의 식사 조건"
+)
 
 st.caption(
-    "아래 조건은 현재 선택한 대상에게만 저장돼요."
+    "아래 조건은 현재 선택한 관리 대상에게만 저장돼요. "
+    "다른 대상의 식사 조건을 입력하려면 "
+    "왼쪽 사이드바의 ‘관리 대상’ 목록에서 해당 이름을 선택해 주세요."
 )
 
 if not is_person:
@@ -749,7 +727,7 @@ if not is_person:
     st.page_link(
         "pages/lifestyle.py",
         label="반려동물의 사료·간식 섭취 기록하기",
-        icon="📝"
+        icon="📝",
     )
 
 
@@ -763,7 +741,7 @@ with st.form(
             "확인된 알레르기를 입력해 주세요. "
             "없다면 ‘없음’이라고 입력해 주세요."
         ),
-        max_chars=1000
+        max_chars=1000,
     )
 
     st.caption(
@@ -775,7 +753,7 @@ with st.form(
         "제외하고 싶은 음식·재료",
         value=settings.get("excluded_foods") or "",
         placeholder="제외할 음식·재료 이름을 입력해 주세요.",
-        max_chars=1000
+        max_chars=1000,
     )
 
     guidance_label = (
@@ -788,7 +766,7 @@ with st.form(
         guidance_label,
         value=settings.get("dietary_guidance") or "",
         placeholder="안내받은 내용이 있으면 입력해 주세요.",
-        max_chars=3000
+        max_chars=3000,
     )
 
     st.caption(
@@ -807,7 +785,7 @@ with st.form(
         min_value=1,
         max_value=20,
         value=int(settings.get("servings") or 1),
-        step=1
+        step=1,
     )
 
     if not is_person:
@@ -824,12 +802,12 @@ with st.form(
         value=int(
             settings.get("max_cooking_minutes") or 30
         ),
-        step=5
+        step=5,
     )
 
     save_conditions_clicked = st.form_submit_button(
         "💾 현재 대상의 식사 조건 저장",
-        use_container_width=True
+        use_container_width=True,
     )
 
 
@@ -844,16 +822,16 @@ if save_conditions_clicked:
                 "excluded_foods": excluded_foods.strip(),
                 "dietary_guidance": dietary_guidance.strip(),
                 "servings": int(servings),
-                "max_cooking_minutes": int(cooking_minutes)
+                "max_cooking_minutes": int(cooking_minutes),
             },
-            bool(settings)
+            bool(settings),
         )
 
     except Exception as error:
         show_error(
             "식사 조건 저장 결과를 확인하지 못했어요. "
             "페이지를 다시 열어 확인해 주세요.",
-            error
+            error,
         )
 
     else:
@@ -864,7 +842,7 @@ if save_conditions_clicked:
         st.rerun()
 
 
-# 저장된 재료와 날짜별 상태
+# 저장된 재료와 상태
 st.divider()
 st.markdown("### 📋 현재 저장된 내용")
 
@@ -872,17 +850,17 @@ c1, c2, c3 = st.columns(3)
 
 c1.metric(
     "공유 냉장고 재료",
-    f"{len(saved_ingredients)}종류"
+    f"{len(saved_ingredients)}종류",
 )
 
 c2.metric(
     "한 끼 인분 수" if is_person else "준비할 급여 분량 수",
-    settings.get("servings") or 1
+    settings.get("servings") or 1,
 )
 
 c3.metric(
     "최대 조리 시간",
-    f"{settings.get('max_cooking_minutes') or 30}분"
+    f"{settings.get('max_cooking_minutes') or 30}분",
 )
 
 if saved_ingredients:
@@ -891,7 +869,7 @@ if saved_ingredients:
     for item in saved_ingredients:
         expiry, status, eligible = expiry_info(
             item,
-            today
+            today,
         )
 
         amount = item.get("amount")
@@ -908,13 +886,13 @@ if saved_ingredients:
                 if expiry
                 else "미입력 또는 확인 필요"
             ),
-            "상태": status
+            "상태": status,
         })
 
     st.dataframe(
         pd.DataFrame(summary),
         hide_index=True,
-        use_container_width=True
+        use_container_width=True,
     )
 
     st.caption(
@@ -941,7 +919,7 @@ with st.expander(
     condition_fields = [
         ("알레르기", "allergies"),
         ("제외할 음식·재료", "excluded_foods"),
-        (guidance_label, "dietary_guidance")
+        (guidance_label, "dietary_guidance"),
     ]
 
     for label, field in condition_fields:
@@ -957,7 +935,7 @@ st.caption(
 )
 
 
-# 기한이 지난 재료만 선택 삭제
+# 기한이 지난 재료 선택 삭제
 expired_indices = [
     index
     for index, item in enumerate(saved_ingredients)
@@ -997,14 +975,12 @@ with st.expander(
                     f"{saved_ingredients[index]['name']} · "
                     "기한 "
                     f"{saved_ingredients[index].get('expiry_date')}"
-                )
+                ),
             )
 
-            delete_expired_clicked = (
-                st.form_submit_button(
-                    "🗑️ 선택한 기한 지난 재료 삭제",
-                    use_container_width=True
-                )
+            delete_expired_clicked = st.form_submit_button(
+                "🗑️ 선택한 기한 지난 재료 삭제",
+                use_container_width=True,
             )
 
         if delete_expired_clicked:
@@ -1017,13 +993,12 @@ with st.expander(
                 try:
                     current = read_fridge(
                         client,
-                        user.id
+                        user.id,
                     )
 
                     if (
                         current is None
-                        or fingerprint(current)
-                        != fridge_revision
+                        or fingerprint(current) != fridge_revision
                     ):
                         raise ValueError(
                             "냉장고 내용이 바뀌었어요. "
@@ -1032,10 +1007,7 @@ with st.expander(
                         )
 
                     delete_day = get_local_now().date()
-
-                    selected_set = set(
-                        selected_expired
-                    )
+                    selected_set = set(selected_expired)
 
                     for index in selected_set:
                         expiry = parse_expiry(
@@ -1065,7 +1037,7 @@ with st.expander(
                         client.table("family_fridges")
                         .update(
                             {"ingredients": remaining},
-                            returning="representation"
+                            returning="representation",
                         )
                         .eq("user_id", user.id)
                         .execute()
@@ -1085,7 +1057,7 @@ with st.expander(
                     show_error(
                         "삭제 결과를 확인하지 못했어요. "
                         "목록을 다시 불러와 확인해 주세요.",
-                        error
+                        error,
                     )
                     st.stop()
 
@@ -1111,7 +1083,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
         "초기화할 항목 옆의 선택 칸을 눌러 주세요.",
         list(RESET_OPTIONS),
         index=None,
-        key=f"meal_reset_choice_{scope}_{revision}"
+        key=f"meal_reset_choice_{scope}_{revision}",
     )
 
     reset_type = RESET_OPTIONS.get(reset_label)
@@ -1163,7 +1135,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
         reset_name = st.text_input(
             "확인을 위해 현재 관리 대상 이름을 "
             "그대로 입력해 주세요.",
-            help=f"입력할 이름: {profile['name']}"
+            help=f"입력할 이름: {profile['name']}",
         )
 
         reset_clicked = st.form_submit_button(
@@ -1172,7 +1144,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
             disabled=(
                 reset_type is None
                 or not reset_has_data
-            )
+            ),
         )
 
     if reset_clicked:
@@ -1195,7 +1167,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
                         client.table("family_fridges")
                         .update(
                             {"ingredients": []},
-                            returning="representation"
+                            returning="representation",
                         )
                         .eq("user_id", user.id)
                         .execute()
@@ -1213,7 +1185,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
 
                     st.session_state.pop(
                         f"meal_import_conflicts_{user.id}",
-                        None
+                        None,
                     )
 
                 if (
@@ -1229,9 +1201,9 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
                             "excluded_foods": "",
                             "dietary_guidance": "",
                             "servings": 1,
-                            "max_cooking_minutes": 30
+                            "max_cooking_minutes": 30,
                         },
-                        True
+                        True,
                     )
 
                     completed.append(
@@ -1249,7 +1221,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
                     "일부 요청의 처리 결과를 확인하지 못했어요. "
                     "페이지를 다시 열어 각 저장 내용을 "
                     "확인해 주세요.",
-                    error
+                    error,
                 )
 
                 st.stop()
@@ -1274,16 +1246,14 @@ excluded_by_date = []
 for item in saved_ingredients:
     expiry, status, eligible = expiry_info(
         item,
-        ai_today
+        ai_today,
     )
 
     if eligible:
         ai_ingredients.append(item)
 
     else:
-        excluded_by_date.append(
-            item["name"]
-        )
+        excluded_by_date.append(item["name"])
 
 
 if excluded_by_date:
@@ -1300,12 +1270,12 @@ st.caption(
 
 recommendation_settings = {
     **settings,
-    "ingredients": ai_ingredients
+    "ingredients": ai_ingredients,
 }
 
 show_meal_recommendations(
     user_id=user.id,
     profile_id=profile_id,
     settings=recommendation_settings,
-    profile=profile
+    profile=profile,
 )
