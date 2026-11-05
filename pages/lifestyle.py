@@ -86,43 +86,6 @@ def check_activity_conflict(
         )
 
 
-def display_records(rows):
-    result = []
-
-    for row in rows:
-        kind = row["record_type"]
-        amount = row.get("amount")
-        duration = row.get("duration_minutes")
-        end_text = ""
-
-        if kind == "sleep" and duration:
-            started = datetime.fromisoformat(
-                row["record_date"] + "T" + row["record_time"]
-            )
-            ended = started + timedelta(minutes=int(duration))
-            end_text = ended.strftime("%Y-%m-%d %H:%M")
-
-        result.append({
-            "날짜": row["record_date"],
-            "시간": str(row.get("record_time") or "")[:5],
-            "종류": TYPE_LABELS.get(kind, kind),
-            "음식·활동": row.get("item_name") or "",
-            "식사 구분": row.get("meal_slot") or "",
-            "섭취량": (
-                f"{float(amount):g} {row.get('amount_unit') or ''}"
-                if amount is not None else ""
-            ),
-            "지속 시간(분)": (
-                int(duration) if duration is not None else None
-            ),
-            "강도": row.get("intensity") or "",
-            "수면 종료": end_text,
-            "메모": row.get("memo") or "",
-        })
-
-    return pd.DataFrame(result)
-
-
 def format_minutes(minutes):
     hours, remaining = divmod(int(minutes), 60)
 
@@ -131,6 +94,157 @@ def format_minutes(minutes):
     if hours:
         return f"{hours}시간"
     return f"{remaining}분"
+
+
+def display_records(rows, kind_filter="전체"):
+    result = []
+    icons = {
+        "meal": "🍽️",
+        "activity": "🏃",
+        "sleep": "😴",
+        "no_activity": "📅",
+    }
+
+    for row in rows:
+        kind = row["record_type"]
+        day = row["record_date"]
+        clock = str(row.get("record_time") or "")[:5]
+        name = row.get("item_name") or ""
+        slot = row.get("meal_slot") or ""
+        amount = row.get("amount")
+
+        amount_text = (
+            f"{float(amount):g} {row.get('amount_unit') or ''}".strip()
+            if amount is not None else ""
+        )
+
+        duration = row.get("duration_minutes")
+        duration_text = (
+            format_minutes(duration)
+            if duration is not None else ""
+        )
+
+        intensity = row.get("intensity") or ""
+        memo = row.get("memo") or ""
+        wake_day = ""
+        wake_clock = ""
+
+        if kind == "sleep" and duration is not None:
+            try:
+                started = datetime.combine(
+                    date.fromisoformat(day),
+                    time.fromisoformat(
+                        row.get("record_time") or "00:00"
+                    ),
+                )
+                ended = started + timedelta(
+                    minutes=int(duration)
+                )
+                wake_day = ended.date().isoformat()
+                wake_clock = ended.strftime("%H:%M")
+
+            except (ValueError, TypeError, OverflowError):
+                wake_day = "날짜·시간 확인 필요"
+
+        if kind_filter == "식사":
+            record = {
+                "날짜": day,
+                "섭취 시간": clock,
+                "음식명·사료명": name,
+                "식사 구분": slot,
+                "섭취량": amount_text,
+                "메모": memo,
+            }
+
+        elif kind_filter == "운동·산책":
+            record = {
+                "날짜": day,
+                "시작 시간": clock,
+                "활동명": name,
+                "활동 시간": duration_text,
+                "강도": intensity,
+                "메모": memo,
+            }
+
+        elif kind_filter == "수면":
+            record = {
+                "잠든 날짜": day,
+                "잠든 시간": clock,
+                "일어난 날짜": wake_day,
+                "일어난 시간": wake_clock,
+                "총 수면 시간": duration_text,
+                "메모": memo,
+            }
+
+        elif kind_filter == "활동 없음":
+            record = {
+                "날짜": day,
+                "확인 내용": "활동 없음 확인",
+                "메모": memo,
+            }
+
+        else:
+            if kind == "meal":
+                detail = " · ".join(
+                    value for value in [slot, amount_text]
+                    if value
+                )
+
+            elif kind == "activity":
+                detail = " · ".join(
+                    value for value in [duration_text, intensity]
+                    if value
+                )
+
+            elif kind == "sleep":
+                detail = (
+                    f"{duration_text} · 기상 "
+                    f"{wake_day} {wake_clock}"
+                ).strip()
+
+            else:
+                detail = (
+                    "직접 확인한 기록"
+                    if kind == "no_activity" else ""
+                )
+
+            record = {
+                "날짜": day,
+                "시간": clock or "—",
+                "종류": (
+                    f"{icons.get(kind, '')} "
+                    f"{TYPE_LABELS.get(kind, kind)}"
+                ).strip(),
+                "기록 내용": name,
+                "상세": detail,
+                "메모": memo,
+            }
+
+        result.append(record)
+
+    return pd.DataFrame(result)
+
+
+def style_record_table(table, rows):
+    colors = {
+        "meal": "#FFF4E8",
+        "activity": "#ECF7F0",
+        "sleep": "#F2EEFC",
+        "no_activity": "#F1F3F6",
+    }
+
+    row_colors = [
+        colors.get(row["record_type"], "#FFFFFF")
+        for row in rows
+    ]
+
+    return table.style.apply(
+        lambda row: [
+            f"background-color: {row_colors[row.name]}; "
+            "color: #243247"
+        ] * len(row),
+        axis=1,
+    )
 
 
 def show_record_summary(rows, start, end, kind_filter):
@@ -282,6 +396,7 @@ def show_meal_calendar(rows, start, end, ui_scope):
 
     for row in meals:
         slot = row.get("meal_slot") or "기타"
+
         if slot not in MEAL_SLOTS:
             slot = "기타"
 
@@ -1089,8 +1204,7 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
 
             original_unit = row.get("amount_unit") or "g"
             units = (
-                UNITS
-                if original_unit in UNITS
+                UNITS if original_unit in UNITS
                 else UNITS + [original_unit]
             )
 
@@ -1746,15 +1860,31 @@ st.caption(
     "식사는 음식 한 종류당 한 행으로 표시해요. "
     "수정하거나 삭제할 기록은 표 맨 왼쪽, 날짜 앞에 있는 "
     "네모 선택 칸을 눌러 체크해 주세요. "
-    "체크하면 표 아래에 해당 기록의 수정·삭제 화면이 나타나요."
+    "체크하면 표 아래에 해당 기록의 전체 메모와 "
+    "수정·삭제 화면이 나타나요."
 )
 
-table = display_records(rows)
+table = display_records(rows, kind_filter)
+
+st.caption(
+    "행 색상: 🍽️ 식사 — 연한 주황 · "
+    "🏃 운동·산책 — 연한 초록 · "
+    "😴 수면 — 연한 보라 · "
+    "📅 활동 없음 — 연한 회색"
+)
 
 event = st.dataframe(
-    table,
+    style_record_table(table, rows),
     hide_index=True,
     use_container_width=True,
+    column_config={
+        "메모": st.column_config.TextColumn(
+            "메모", width="medium"
+        ),
+        "상세": st.column_config.TextColumn(
+            "상세", width="large"
+        ),
+    },
     on_select="rerun",
     selection_mode="single-row",
     key=f"lifestyle_table_{ui_scope}_{fingerprint(rows)}",
@@ -1781,6 +1911,14 @@ if positions and 0 <= positions[0] < len(rows):
         f"{row.get('item_name') or ''}"
     )
 
+    with st.container(border=True):
+        st.markdown("**📝 선택한 기록의 전체 메모**")
+
+        if row.get("memo"):
+            st.text(row["memo"])
+        else:
+            st.caption("저장한 메모가 없어요.")
+
     show_lifestyle_editor(
         client=client,
         user_id=user.id,
@@ -1805,6 +1943,7 @@ if positions and 0 <= positions[0] < len(rows):
     if delete_clicked:
         if not confirm_delete:
             st.warning("삭제 확인란을 먼저 체크해 주세요.")
+
         else:
             try:
                 result = (
