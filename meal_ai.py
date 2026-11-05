@@ -5,7 +5,6 @@ import math
 import time
 
 import streamlit as st
-
 from openai import (
     OpenAI,
     APIConnectionError,
@@ -14,7 +13,6 @@ from openai import (
     AuthenticationError,
     RateLimitError,
 )
-
 from pydantic import BaseModel
 
 from app_shared import get_local_now, get_timezone_name
@@ -38,7 +36,6 @@ DOG_SECTIONS = [
     ("dinner", "🐾 후보 3"),
 ]
 
-# 개별 강아지의 섭취 안전성을 보장하는 목록은 아니에요.
 DOG_INGREDIENT_NAMES = {
     "닭가슴살",
     "당근",
@@ -66,7 +63,8 @@ class DailyMealPlan(BaseModel):
 
 SYSTEM_PROMPT = """
 너는 냉장고 재료를 활용하는 일반적인 요리 메뉴 제안 도우미다.
-한국어로 아침, 점심, 저녁 메뉴를 각각 한 가지씩 제안한다.
+한국어 존댓말로 아침, 점심, 저녁 메뉴를 각각 한 가지씩 제안한다.
+메뉴 설명과 조리 단계 등 사용자에게 보이는 모든 문장은 존댓말로 작성한다.
 
 반드시 지킬 조건:
 1. 전달받은 재료를 우선 활용한다.
@@ -94,7 +92,8 @@ SYSTEM_PROMPT = """
 
 DOG_SYSTEM_PROMPT = """
 너는 보호자가 수의사에게 확인할 강아지용 토핑·간식 조리 후보를 제안한다.
-한국어로 서로 대안이 되는 후보 세 가지를 작성한다.
+한국어 존댓말로 서로 대안이 되는 후보 세 가지를 작성한다.
+메뉴 설명과 조리 단계 등 사용자에게 보이는 모든 문장은 존댓말로 작성한다.
 주식, 하루 식단, 아침·점심·저녁 급여 계획을 만들지 않는다.
 응답 구조의 breakfast, lunch, dinner는 각각 후보 1, 2, 3의 저장 키일 뿐이다.
 
@@ -144,8 +143,8 @@ def resolve_target(profile):
         return "dog"
 
     raise ValueError(
-        "현재 AI 추천은 사람과 강아지를 지원해. "
-        "다른 동물의 조건 저장은 계속 이용할 수 있어."
+        "현재 AI 추천은 사람과 강아지를 지원해요. "
+        "다른 동물의 조건 저장은 계속 이용할 수 있어요."
     )
 
 
@@ -179,18 +178,18 @@ def build_request(
     today=None,
 ):
     if target not in {"person", "dog"}:
-        raise ValueError("추천 대상을 확인해 줘.")
+        raise ValueError("추천 대상을 확인해 주세요.")
 
     ingredients = settings.get("ingredients") or []
 
     if not isinstance(ingredients, list) or not ingredients:
         raise ValueError(
-            "재료를 한 가지 이상 저장한 뒤 추천받아 줘."
+            "재료를 한 가지 이상 저장한 뒤 추천받아 주세요."
         )
 
     if len(ingredients) > 50:
         raise ValueError(
-            "한 번에 추천에 사용할 재료는 최대 50종류야."
+            "한 번에 추천에 사용할 재료는 최대 50종류예요."
         )
 
     today = (
@@ -204,7 +203,7 @@ def build_request(
     for item in ingredients:
         if not isinstance(item, dict):
             raise ValueError(
-                "저장된 재료 형식을 확인해 줘."
+                "저장된 재료 형식을 확인해 주세요."
             )
 
         if not ingredient_is_current(item, today):
@@ -216,7 +215,7 @@ def build_request(
 
         if not name or len(name) > 80:
             raise ValueError(
-                "각 재료명은 1~80자로 입력해 줘."
+                "각 재료명은 1~80자로 입력해 주세요."
             )
 
         raw_amount = item.get("amount")
@@ -227,7 +226,7 @@ def build_request(
 
             if not math.isfinite(amount) or amount <= 0:
                 raise ValueError(
-                    f"‘{name}’의 보유량을 확인해 줘."
+                    f"‘{name}’의 보유량을 확인해 주세요."
                 )
 
         unit = str(
@@ -236,7 +235,7 @@ def build_request(
 
         if amount is not None and not unit:
             raise ValueError(
-                f"‘{name}’의 단위를 선택해 줘."
+                f"‘{name}’의 단위를 선택해 주세요."
             )
 
         cleaned.append({
@@ -247,12 +246,14 @@ def build_request(
 
     if not cleaned:
         raise ValueError(
-            "추천에 사용할 재료가 없어. "
-            "기한이 지났거나 날짜 확인이 필요한 재료는 제외돼. "
-            "냉장고의 재료와 기한을 확인해 줘."
+            "추천에 사용할 재료가 없어요. "
+            "기한이 지났거나 날짜 확인이 필요한 재료는 제외돼요. "
+            "냉장고의 재료와 기한을 확인해 주세요."
         )
 
-    servings = int(settings.get("servings", 1))
+    servings = int(
+        settings.get("servings", 1)
+    )
 
     cooking_minutes = int(
         settings.get("max_cooking_minutes", 30)
@@ -260,12 +261,12 @@ def build_request(
 
     if not 1 <= servings <= 20:
         raise ValueError(
-            "인분 수는 1~20으로 설정해 줘."
+            "인분 수는 1~20으로 설정해 주세요."
         )
 
     if not 5 <= cooking_minutes <= 240:
         raise ValueError(
-            "최대 조리 시간은 5~240분으로 설정해 줘."
+            "최대 조리 시간은 5~240분으로 설정해 주세요."
         )
 
     excluded_foods = str(
@@ -274,7 +275,7 @@ def build_request(
 
     if len(excluded_foods) > 1000:
         raise ValueError(
-            "제외할 음식·재료는 1,000자 이내로 입력해 줘."
+            "제외할 음식·재료는 1,000자 이내로 입력해 주세요."
         )
 
     if target == "dog":
@@ -292,9 +293,9 @@ def build_request(
 
         if not cleaned:
             raise ValueError(
-                "강아지 추천에 사용할 재료가 없어. "
+                "강아지 추천에 사용할 재료가 없어요. "
                 "지원하는 단일 재료 이름과 "
-                "제외 조건을 확인해 줘."
+                "제외 조건을 확인해 주세요."
             )
 
         return {
@@ -304,7 +305,6 @@ def build_request(
             "max_cooking_minutes": cooking_minutes,
         }
 
-    # 냉장고 ID·계정 ID·이름·건강기록 등은 포함하지 않아요.
     return {
         "target": "person",
         "ingredients": cleaned,
@@ -340,7 +340,7 @@ def validate_plan(
 
         if not meal.menu.strip():
             raise ValueError(
-                f"{label} 메뉴 이름을 받지 못했어."
+                f"{label} 메뉴 이름을 받지 못했어요."
             )
 
         if not meal.ingredients or not all(
@@ -348,7 +348,7 @@ def validate_plan(
             for item in meal.ingredients
         ):
             raise ValueError(
-                f"{label} 재료 목록을 받지 못했어."
+                f"{label} 재료 목록을 받지 못했어요."
             )
 
         if not meal.steps or not all(
@@ -356,15 +356,15 @@ def validate_plan(
             for item in meal.steps
         ):
             raise ValueError(
-                f"{label} 조리법을 받지 못했어."
+                f"{label} 조리법을 받지 못했어요."
             )
 
         if not (
             1 <= meal.cooking_minutes <= max_cooking_minutes
         ):
             raise ValueError(
-                "추천 조리 시간이 설정한 조건과 맞지 않아. "
-                "다시 추천받아 줘."
+                "추천 조리 시간이 설정한 조건과 맞지 않아요. "
+                "다시 추천받아 주세요."
             )
 
         if is_dog:
@@ -381,8 +381,8 @@ def validate_plan(
             ):
                 raise ValueError(
                     "강아지 후보에 전달하지 않은 재료가 "
-                    "포함돼 표시하지 않았어. "
-                    "다시 추천받아 줘."
+                    "포함돼 표시하지 않았어요. "
+                    "다시 추천받아 주세요."
                 )
 
             if any(
@@ -391,13 +391,13 @@ def validate_plan(
             ):
                 raise ValueError(
                     "강아지 후보에 허용하지 않은 "
-                    "추가 재료가 있어 표시하지 않았어."
+                    "추가 재료가 있어 표시하지 않았어요."
                 )
 
             if not 3 <= len(meal.steps) <= 5:
                 raise ValueError(
-                    "조리 단계 형식이 맞지 않아. "
-                    "다시 추천받아 줘."
+                    "조리 단계 형식이 맞지 않아요. "
+                    "다시 추천받아 주세요."
                 )
 
         result[field] = {
@@ -432,9 +432,9 @@ def request_meal_plan(api_key, request_data):
 
     request_message = (
         "서로 대안이 되는 강아지 토핑·간식 "
-        "후보 세 가지를 추천해 줘.\n"
+        "후보 세 가지를 추천해 주세요.\n"
         if is_dog
-        else "아침·점심·저녁 메뉴를 추천해 줘.\n"
+        else "아침·점심·저녁 메뉴를 추천해 주세요.\n"
     )
 
     with OpenAI(
@@ -468,21 +468,21 @@ def request_meal_plan(api_key, request_data):
 
     if not completion.choices:
         raise ValueError(
-            "추천 결과를 받지 못했어."
+            "추천 결과를 받지 못했어요."
         )
 
     message = completion.choices[0].message
 
     if message.refusal:
         raise ValueError(
-            "이 조건으로 추천을 받지 못했어. "
-            "입력 내용을 확인해 줘."
+            "이 조건으로 추천을 받지 못했어요. "
+            "입력 내용을 확인해 주세요."
         )
 
     if message.parsed is None:
         raise ValueError(
-            "추천 결과를 읽지 못했어. "
-            "다시 시도해 줘."
+            "추천 결과를 읽지 못했어요. "
+            "다시 시도해 주세요."
         )
 
     return validate_plan(
@@ -508,9 +508,9 @@ def render_plan(result):
         )
 
         st.info(
-            "세 후보는 아침·점심·저녁 급여 계획이 아니야. "
+            "세 후보는 아침·점심·저녁 급여 계획이 아니에요. "
             "주식을 대체하거나 세 가지를 모두 급여하는 "
-            "용도로 쓰지 마."
+            "용도로 쓰지 마세요."
         )
 
     else:
@@ -552,7 +552,7 @@ def render_plan(result):
 
             else:
                 st.write(
-                    "추가 재료 없음으로 제안됐어."
+                    "추가 재료 없음으로 제안됐어요."
                 )
 
             st.markdown("**만드는 방법**")
@@ -564,9 +564,9 @@ def render_plan(result):
                 st.write(f"{number}. {step}")
 
     st.caption(
-        "AI가 제안한 메뉴야. "
+        "AI가 제안한 메뉴예요. "
         "실제 보유량과 제품 성분, "
-        "조리 상태를 확인한 뒤 활용해 줘."
+        "조리 상태를 확인한 뒤 활용해 주세요."
     )
 
 
@@ -588,8 +588,6 @@ def show_meal_recommendations(
 
     is_dog = target == "dog"
 
-    # meal.py에서 선택한 냉장고 ID를 사용해요.
-    # 필요하면 호출할 때 fridge_id를 직접 전달할 수도 있어요.
     fridge_id = str(
         fridge_id
         or st.session_state.get(
@@ -600,7 +598,7 @@ def show_meal_recommendations(
 
     if not fridge_id:
         st.info(
-            "먼저 위에서 사용할 냉장고를 선택해 줘."
+            "먼저 위에서 사용할 냉장고를 선택해 주세요."
         )
         return
 
@@ -613,9 +611,9 @@ def show_meal_recommendations(
     if is_dog:
         st.info(
             "선택한 냉장고의 재료 중 지원하는 단일 재료로 "
-            "토핑·간식 후보 세 가지를 제안해. "
+            "토핑·간식 후보 세 가지를 제안해요. "
             "강아지의 하루 주식이나 치료 식단을 "
-            "만드는 기능은 아니야."
+            "만드는 기능은 아니에요."
         )
 
         st.caption(
@@ -625,42 +623,42 @@ def show_meal_recommendations(
 
         st.caption(
             "지원 목록 밖의 재료와 이름이 불명확한 "
-            "가공식품은 이번 요청에서 제외해. "
-            "제외된 재료가 모두 유해하다는 뜻은 아니야."
+            "가공식품은 이번 요청에서 제외해요. "
+            "제외된 재료가 모두 유해하다는 뜻은 아니에요."
         )
 
     else:
         st.info(
             "선택한 냉장고의 저장된 재료·제외할 음식·"
             "인분·조리 시간으로 "
-            "일반적인 요리 메뉴를 추천해."
+            "일반적인 요리 메뉴를 추천해요."
         )
 
     st.caption(
         "추천 버튼을 누르면 아래에 표시한 내용이 "
-        "Google Gemini로 전송돼. "
-        "재료명과 제외할 음식에는 음식 이름만 적어 줘."
+        "Google Gemini로 전송돼요. "
+        "재료명과 제외할 음식에는 음식 이름만 적어 주세요."
     )
 
     st.warning(
         "이름·계정 ID·냉장고 ID·저장한 혈당·실제 식사 기록·"
         "알레르기·의료진 또는 수의사 지침은 "
-        "전송하거나 자동 반영하지 않아. "
+        "전송하거나 자동 반영하지 않아요. "
         "개인별 치료 식단이나 "
-        "알레르기 안전 식단을 보장하지 않아."
+        "알레르기 안전 식단을 보장하지 않아요."
     )
 
     if is_dog:
         st.caption(
             "질환·알레르기·처방식이 있다면 "
             "새로운 재료의 사용 가능 여부를 "
-            "수의사에게 먼저 확인해 줘. "
-            "권장 급여량은 계산하지 않아."
+            "수의사에게 먼저 확인해 주세요. "
+            "권장 급여량은 계산하지 않아요."
         )
 
     if not settings:
         st.info(
-            "먼저 위에서 재료와 식사 조건을 저장해 줘."
+            "먼저 위에서 재료와 식사 조건을 저장해 주세요."
         )
         return
 
@@ -670,7 +668,7 @@ def show_meal_recommendations(
     st.caption(
         f"재료 기한 확인 기준: {local_today:%Y-%m-%d} "
         f"({timezone_name}). 기한이 지났거나 날짜가 잘못된 "
-        "재료는 제외하고, 기한 미입력 재료는 포함해."
+        "재료는 제외하고, 기한 미입력 재료는 포함해요."
     )
 
     try:
@@ -750,8 +748,8 @@ def show_meal_recommendations(
 
         else:
             st.write(
-                "급여 분량 수는 AI에 보내지 않아. "
-                "후보별 적정 급여량도 계산하지 않아."
+                "급여 분량 수는 AI에 보내지 않아요. "
+                "후보별 적정 급여량도 계산하지 않아요."
             )
 
         st.write(
@@ -762,26 +760,24 @@ def show_meal_recommendations(
     st.caption(
         "입력란을 바꿨다면 해당 영역의 "
         "‘선택한 냉장고 재료 저장’ 또는 "
-        "‘현재 대상의 식사 조건 저장’을 눌러 줘. "
-        "추천에는 현재 저장된 내용이 사용돼."
+        "‘현재 대상의 식사 조건 저장’을 눌러 주세요. "
+        "추천에는 현재 저장된 내용이 사용돼요."
     )
 
     scope = f"{user_id}_{profile_id}_{target}"
 
-    # 냉장고별 추천 결과를 별도로 보관해요.
     result_key = (
         f"meal_ai_result_{scope}_{fingerprint(fridge_id)}"
     )
 
-    # 냉장고를 바꾸더라도 연속 요청 제한은 유지해요.
     last_request_key = (
         f"meal_ai_last_request_{scope}"
     )
 
-    # 아래 정보는 앱 안에서 결과를 구분할 때만 사용해요.
-    # Gemini에는 request_data만 전송해요.
+    # 앱 내부에서만 사용하는 결과 구분 정보예요.
     request_version = fingerprint({
         "request_data": request_data,
+        "response_style": "polite_v1",
         "fridge_id": fridge_id,
         "local_date": local_today.isoformat(),
         "timezone": timezone_name,
@@ -794,7 +790,7 @@ def show_meal_recommendations(
     if not api_key:
         st.warning(
             "Streamlit Secrets에 "
-            "GEMINI_API_KEY를 설정해 줘."
+            "GEMINI_API_KEY를 설정해 주세요."
         )
 
     button_label = (
@@ -820,7 +816,7 @@ def show_meal_recommendations(
             st.warning(
                 "연속 요청을 줄이기 위해 "
                 "이전 요청 후 20초가 지나면 "
-                "다시 추천받을 수 있어."
+                "다시 추천받을 수 있어요."
             )
 
         else:
@@ -829,9 +825,9 @@ def show_meal_recommendations(
             )
 
             spinner_message = (
-                "토핑·간식 후보를 만들고 있어…"
+                "토핑·간식 후보를 만들고 있어요…"
                 if is_dog
-                else "세 끼 메뉴를 만들고 있어…"
+                else "세 끼 메뉴를 만들고 있어요…"
             )
 
             try:
@@ -843,47 +839,47 @@ def show_meal_recommendations(
 
             except AuthenticationError:
                 st.error(
-                    "API 키를 확인하지 못했어. "
-                    "Secrets의 GEMINI_API_KEY를 확인해 줘."
+                    "API 키를 확인하지 못했어요. "
+                    "Secrets의 GEMINI_API_KEY를 확인해 주세요."
                 )
 
             except RateLimitError:
                 st.warning(
-                    "Gemini 요청 한도에 도달했어. "
+                    "Gemini 요청 한도에 도달했어요. "
                     "잠시 후 다시 시도하고, 계속되면 "
-                    "AI Studio에서 사용 한도를 확인해 줘."
+                    "AI Studio에서 사용 한도를 확인해 주세요."
                 )
 
             except APITimeoutError:
                 st.warning(
-                    "추천 응답 시간이 초과됐어. "
-                    "잠시 후 다시 추천받아 줘."
+                    "추천 응답 시간이 초과됐어요. "
+                    "잠시 후 다시 추천받아 주세요."
                 )
 
             except APIConnectionError:
                 st.warning(
-                    "Gemini 서버에 연결하지 못했어. "
-                    "잠시 후 다시 시도해 줘."
+                    "Gemini 서버에 연결하지 못했어요. "
+                    "잠시 후 다시 시도해 주세요."
                 )
 
             except APIStatusError as error:
                 if error.status_code == 403:
                     st.error(
-                        "현재 프로젝트에서 요청이 허용되지 않았어. "
-                        "AI Studio의 접근 권한과 이용 상태를 확인해 줘."
+                        "현재 프로젝트에서 요청이 허용되지 않았어요. "
+                        "AI Studio의 접근 권한과 이용 상태를 확인해 주세요."
                     )
 
                 elif error.status_code == 404:
                     st.error(
-                        "사용할 모델을 찾지 못했어. "
+                        "사용할 모델을 찾지 못했어요. "
                         f"AI Studio에서 {MODEL}의 "
-                        "사용 가능 여부를 확인해 줘."
+                        "사용 가능 여부를 확인해 주세요."
                     )
 
                 else:
                     st.warning(
-                        "Gemini가 추천 요청을 처리하지 못했어. "
-                        "잠시 후 다시 시도해 줘."
+                        "Gemini가 추천 요청을 처리하지 못했어요. "
+                        "잠시 후 다시 시도해 주세요."
                     )
 
             except ValueError as error:
@@ -891,8 +887,8 @@ def show_meal_recommendations(
 
             except Exception:
                 st.warning(
-                    "추천 결과를 처리하지 못했어. "
-                    "잠시 후 다시 추천받아 줘."
+                    "추천 결과를 처리하지 못했어요. "
+                    "잠시 후 다시 추천받아 주세요."
                 )
 
             else:
@@ -910,9 +906,9 @@ def show_meal_recommendations(
                 }
 
                 st.success(
-                    "강아지 토핑·간식 후보를 만들었어."
+                    "강아지 토핑·간식 후보를 만들었어요."
                     if is_dog
-                    else "아침·점심·저녁 메뉴를 만들었어."
+                    else "아침·점심·저녁 메뉴를 만들었어요."
                 )
 
     result = st.session_state.get(result_key)
@@ -920,8 +916,8 @@ def show_meal_recommendations(
     if result:
         if result["request_version"] != request_version:
             st.info(
-                "저장된 재료·조건 또는 기준 날짜·시간대가 바뀌었어. "
-                "현재 기준으로 다시 추천받아 줘."
+                "재료·조건·날짜·시간대 또는 추천 안내 방식이 바뀌었어요. "
+                "현재 기준으로 다시 추천받아 주세요."
             )
 
         else:
@@ -929,6 +925,6 @@ def show_meal_recommendations(
             render_plan(result)
 
     st.caption(
-        "추천 결과는 현재 접속 세션에서 냉장고·관리 대상별로 보관해. "
-        "화면을 다시 그릴 때 자동으로 API를 호출하지 않아."
+        "추천 결과는 현재 접속 세션에서 냉장고·관리 대상별로 보관해요. "
+        "화면을 다시 그릴 때 자동으로 API를 호출하지 않아요."
     )
