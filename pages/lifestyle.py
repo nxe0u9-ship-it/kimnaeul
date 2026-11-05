@@ -249,7 +249,7 @@ def show_record_summary(rows, start, end, kind_filter):
     if len(rows) >= 1000:
         st.warning(
             "조회 결과가 최대 표시 건수인 1,000건에 도달했어요. "
-            "요약도 표시된 기록만 계산해요. "
+            "요약과 그래프도 표시된 기록만 사용해요. "
             "기간 전체를 확인하려면 조회 기간을 줄여 주세요."
         )
 
@@ -436,6 +436,262 @@ def show_meal_calendar(rows, start, end, ui_scope):
     st.divider()
 
 
+def show_activity_chart(rows, start, end, ui_scope):
+    activity_rows = [
+        row for row in rows
+        if row["record_type"] in ["activity", "no_activity"]
+    ]
+
+    st.markdown("### 🏃 날짜별 운동·산책 시간")
+
+    if not activity_rows:
+        st.info(
+            "선택한 기간에 표시할 운동·산책 또는 "
+            "활동 없음 확인 기록이 없어요."
+        )
+        return
+
+    months = sorted(
+        {row["record_date"][:7] for row in activity_rows},
+        reverse=True,
+    )
+
+    selected_month = st.selectbox(
+        "활동 기록을 볼 월",
+        months,
+        format_func=lambda value: (
+            f"{value[:4]}년 {int(value[5:7])}월"
+        ),
+        key=f"activity_chart_month_{ui_scope}_{start}_{end}",
+    )
+
+    first_day = date.fromisoformat(selected_month + "-01")
+    next_month = (
+        first_day.replace(day=28) + timedelta(days=4)
+    ).replace(day=1)
+
+    visible_start = max(start, first_day)
+    visible_end = min(end, next_month - timedelta(days=1))
+
+    grouped = {}
+    confirmed_days = set()
+
+    for row in activity_rows:
+        day = date.fromisoformat(row["record_date"])
+
+        if not visible_start <= day <= visible_end:
+            continue
+
+        if row["record_type"] == "no_activity":
+            confirmed_days.add(day.isoformat())
+            continue
+
+        name = row.get("item_name") or "기타 활동"
+        group_key = (day.isoformat(), name)
+        total, count = grouped.get(group_key, (0, 0))
+
+        grouped[group_key] = (
+            total + int(row.get("duration_minutes") or 0),
+            count + 1,
+        )
+
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+    labels = {}
+    current_day = visible_start
+
+    while current_day <= visible_end:
+        labels[current_day.isoformat()] = (
+            f"{current_day:%m/%d} "
+            f"({weekdays[current_day.weekday()]})"
+        )
+        current_day += timedelta(days=1)
+
+    totals = {}
+
+    for (day, name), (minutes, count) in grouped.items():
+        totals[day] = totals.get(day, 0) + minutes
+
+    chart_rows = []
+
+    for (day, name), (minutes, count) in sorted(grouped.items()):
+        chart_rows.append(
+            {
+                "날짜": day,
+                "날짜 표시": labels[day],
+                "표시 종류": "활동",
+                "활동 종류": name,
+                "활동 시간(분)": minutes,
+                "활동 시간": format_minutes(minutes),
+                "날짜별 총 활동 시간": format_minutes(totals[day]),
+                "기록 수": count,
+                "상태": "활동 기록 있음",
+            }
+        )
+
+    for day, label in labels.items():
+        chart_rows.append(
+            {
+                "날짜": day,
+                "날짜 표시": label,
+                "표시 종류": "날짜 기준",
+                "활동 종류": "",
+                "활동 시간(분)": 0,
+                "활동 시간": "",
+                "날짜별 총 활동 시간": "",
+                "기록 수": 0,
+                "상태": (
+                    "활동 없음 확인"
+                    if day in confirmed_days
+                    else ""
+                ),
+            }
+        )
+
+    st.caption(
+        "막대 높이는 날짜별 총 활동 시간이에요. "
+        "활동 종류마다 색을 나눠 표시하며, 커서를 올리면 "
+        "종류별 시간과 기록 수를 확인할 수 있어요."
+    )
+
+    st.vega_lite_chart(
+        pd.DataFrame(chart_rows),
+        {
+            "height": 320,
+            "encoding": {
+                "x": {
+                    "field": "날짜 표시",
+                    "type": "ordinal",
+                    "sort": list(labels.values()),
+                    "axis": {
+                        "title": None,
+                        "labelAngle": -45,
+                        "labelOverlap": False,
+                        "labelFontSize": 11,
+                    },
+                },
+                "y": {
+                    "field": "활동 시간(분)",
+                    "type": "quantitative",
+                    "scale": {"zero": True},
+                    "axis": {"title": "활동 시간(분)"},
+                },
+            },
+            "layer": [
+                {
+                    "transform": [
+                        {
+                            "filter": (
+                                "datum['표시 종류'] === '활동'"
+                            )
+                        }
+                    ],
+                    "mark": {
+                        "type": "bar",
+                        "tooltip": True,
+                    },
+                    "encoding": {
+                        "y": {
+                            "field": "활동 시간(분)",
+                            "type": "quantitative",
+                            "stack": "zero",
+                        },
+                        "color": {
+                            "field": "활동 종류",
+                            "type": "nominal",
+                            "scale": {"scheme": "tableau10"},
+                            "legend": {
+                                "title": "활동 종류",
+                                "orient": "bottom",
+                            },
+                        },
+                        "order": {
+                            "field": "활동 종류",
+                            "type": "nominal",
+                        },
+                        "tooltip": [
+                            {"field": "날짜", "type": "nominal"},
+                            {
+                                "field": "활동 종류",
+                                "type": "nominal",
+                            },
+                            {
+                                "field": "활동 시간",
+                                "type": "nominal",
+                            },
+                            {
+                                "field": "날짜별 총 활동 시간",
+                                "type": "nominal",
+                            },
+                            {
+                                "field": "기록 수",
+                                "type": "quantitative",
+                                "format": "d",
+                            },
+                        ],
+                    },
+                },
+                {
+                    "transform": [
+                        {
+                            "filter": (
+                                "datum['표시 종류'] === '날짜 기준'"
+                            )
+                        }
+                    ],
+                    "mark": {
+                        "type": "point",
+                        "opacity": 0,
+                    },
+                    "encoding": {
+                        "tooltip": {"value": None},
+                    },
+                },
+                {
+                    "transform": [
+                        {
+                            "filter": (
+                                "datum['표시 종류'] === '날짜 기준' "
+                                "&& datum['상태'] === '활동 없음 확인'"
+                            )
+                        }
+                    ],
+                    "mark": {
+                        "type": "point",
+                        "shape": "square",
+                        "filled": True,
+                        "size": 100,
+                        "color": "#8893A5",
+                        "clip": False,
+                    },
+                    "encoding": {
+                        "tooltip": [
+                            {"field": "날짜", "type": "nominal"},
+                            {"field": "상태", "type": "nominal"},
+                        ],
+                    },
+                },
+            ],
+            "config": {
+                "view": {"stroke": None},
+            },
+        },
+        use_container_width=True,
+    )
+
+    st.caption(
+        "0분 위치의 회색 네모는 직접 저장한 ‘활동 없음 확인’이에요. "
+        "막대와 네모가 모두 없는 날짜는 기록이 없는 날이며, "
+        "활동 시간이 0분이었다는 뜻은 아니에요."
+    )
+    st.caption(
+        "조회 기간 안에서 활동 또는 활동 없음 확인 기록이 있는 "
+        "월만 선택할 수 있어요. "
+        "같은 날짜·활동 종류의 시간은 합산하며, "
+        "중복되거나 시간이 겹치는 기록도 각각 포함해요."
+    )
+    st.divider()
+
+
 def build_edit_values(kind, form, now):
     now = now.replace(tzinfo=None)
     day = form["date"]
@@ -473,7 +729,9 @@ def build_edit_values(kind, form, now):
     started = datetime.combine(day, clock)
 
     if started > now:
-        raise ValueError("아직 지나지 않은 시각으로 수정할 수 없어요.")
+        raise ValueError(
+            "아직 지나지 않은 시각으로 수정할 수 없어요."
+        )
 
     values["record_time"] = clock.strftime("%H:%M")
 
@@ -487,10 +745,14 @@ def build_edit_values(kind, form, now):
             raise ValueError("음식명·사료명을 입력해 주세요.")
 
         if not math.isfinite(amount) or amount <= 0:
-            raise ValueError("섭취량은 0보다 큰 숫자로 입력해 주세요.")
+            raise ValueError(
+                "섭취량은 0보다 큰 숫자로 입력해 주세요."
+            )
 
         if not unit or slot not in MEAL_SLOTS:
-            raise ValueError("섭취량 단위와 식사 구분을 확인해 주세요.")
+            raise ValueError(
+                "섭취량 단위와 식사 구분을 확인해 주세요."
+            )
 
         values.update(
             item_name=name,
@@ -605,7 +867,9 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
 
     with st.form(prefix):
         form["date"] = st.date_input(
-            "잠든 날짜 수정" if kind == "sleep" else "기록 날짜 수정",
+            "잠든 날짜 수정"
+            if kind == "sleep"
+            else "기록 날짜 수정",
             value=original_day,
             max_value=max(original_day, latest_day),
         )
@@ -663,7 +927,6 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             original_duration = max(
                 1, int(row.get("duration_minutes") or 1)
             )
-
             form["duration"] = st.number_input(
                 "활동 시간 수정(분)",
                 min_value=1,
@@ -693,7 +956,6 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
                 value=original_end.date(),
                 max_value=max(original_end.date(), now.date()),
             )
-
             form["wake_time"] = st.time_input(
                 "일어난 시간 수정",
                 value=original_end.time(),
@@ -710,7 +972,6 @@ def show_lifestyle_editor(client, user_id, profile_id, row):
             "보충 메모 수정",
             value=row.get("memo") or "",
         )
-
         save = st.form_submit_button(
             "💾 수정 내용 저장",
             use_container_width=True,
@@ -906,7 +1167,6 @@ if record_type == "meal":
         "같은 식사에서 먹은 음식을 음식별로 입력해요. "
         "섭취량은 실제 먹은 양을 적어 주세요."
     )
-
     food_count = st.number_input(
         "입력할 음식 개수",
         min_value=1,
@@ -1306,6 +1566,9 @@ show_record_summary(rows, start, end, kind_filter)
 
 if kind_filter in ["전체", "식사"]:
     show_meal_calendar(rows, start, end, ui_scope)
+
+if kind_filter in ["전체", "운동·산책", "활동 없음"]:
+    show_activity_chart(rows, start, end, ui_scope)
 
 st.markdown("### 📋 상세 기록 확인·수정")
 st.caption(
