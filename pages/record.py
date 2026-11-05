@@ -54,6 +54,13 @@ div[data-testid="stForm"] {
     background: white;
     border: 1px solid #EEEEEE;
 }
+
+/* 관리 대상 이름 수정 입력란의 선택 강조색 */
+.st-key-care_profile_name_editor [data-baseweb="input"]:focus-within,
+.st-key-care_profile_name_editor [data-testid="stTextInputRootElement"]:focus-within {
+    border-color: #2563EB !important;
+    box-shadow: 0 0 0 1px #2563EB !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -258,7 +265,10 @@ with st.expander("✏️ 관리 대상 이름 수정"):
         "진료 노트는 같은 관리 대상에 연결돼요."
     )
 
-    with st.container(border=True):
+    with st.container(
+        border=True,
+        key="care_profile_name_editor",
+    ):
         edited_name = st.text_input(
             "새 이름 또는 별명을 입력해 주세요.",
             value="",
