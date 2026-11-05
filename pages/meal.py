@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from hashlib import sha256
+from uuid import uuid4
 import json
 import math
 
@@ -21,9 +22,9 @@ UNITS = [
 ]
 
 RESET_OPTIONS = {
-    "공유 냉장고 재료만 초기화": "ingredients",
+    "선택한 냉장고 재료만 초기화": "ingredients",
     "현재 대상의 식사 조건만 초기화": "conditions",
-    "공유 냉장고·현재 대상의 식사 조건 초기화": "all",
+    "선택한 냉장고·현재 대상의 식사 조건 초기화": "all",
 }
 
 
@@ -104,9 +105,7 @@ def clean_ingredients(rows):
         unit = str(row.get("단위") or "").strip()
 
         try:
-            expiry = parse_expiry(
-                row.get("유통·소비기한")
-            )
+            expiry = parse_expiry(row.get("유통·소비기한"))
 
         except (ValueError, TypeError):
             raise ValueError(
@@ -157,11 +156,12 @@ def clean_ingredients(rows):
     return result
 
 
-def read_fridge(client, user_id):
+def read_fridge(client, user_id, fridge_id):
     rows = (
-        client.table("family_fridges")
-        .select("ingredients")
+        client.table("family_refrigerators")
+        .select("id,name,ingredients")
         .eq("user_id", user_id)
+        .eq("id", fridge_id)
         .limit(1)
         .execute()
         .data
@@ -170,90 +170,208 @@ def read_fridge(client, user_id):
     return rows[0] if rows else None
 
 
-def collect_legacy_ingredients(client, user_id):
-    # 기존 대상별 재료는 복사하고 원본은 유지해요.
-    merged = {}
-    conflicts = set()
-    offset = 0
+def show_fridge_picker(client, user_id):
+    st.subheader("🧊 사용할 냉장고 선택")
 
-    while True:
-        rows = (
-            client.table("meal_settings")
-            .select("profile_id,ingredients")
+    st.caption(
+        "같은 계정에서도 집·기숙사처럼 냉장고를 나눠 사용할 수 있어요. "
+        "재료와 기한은 냉장고별로 저장돼요."
+    )
+
+    try:
+        fridges = (
+            client.table("family_refrigerators")
+            .select("id,name,ingredients")
             .eq("user_id", user_id)
-            .order("profile_id")
-            .range(offset, offset + 999)
+            .order("created_at")
+            .order("id")
             .execute()
             .data
         ) or []
 
-        for row in rows:
-            for item in row.get("ingredients") or []:
-                name = str(
-                    item.get("name") or ""
-                ).strip()
+    except Exception as error:
+        show_error(
+            "냉장고 목록을 불러오지 못했어요. "
+            "여러 냉장고용 SQL 실행 여부를 확인해 주세요.",
+            error,
+        )
+        st.stop()
 
-                if not name:
-                    continue
+    with st.expander(
+        "➕ 새 냉장고 만들기",
+        expanded=not fridges,
+    ):
+        with st.form(
+            f"fridge_create_{user_id}",
+            clear_on_submit=True,
+        ):
+            new_name = st.text_input(
+                "새 냉장고 이름",
+                max_chars=50,
+                placeholder="예: 집 냉장고, 기숙사 냉장고",
+            )
 
-                key = name.casefold()
-                expiry = parse_expiry(
-                    item.get("expiry_date")
+            create = st.form_submit_button(
+                "냉장고 만들기",
+                use_container_width=True,
+            )
+
+        if create:
+            name = new_name.strip()
+
+            if not name:
+                st.warning(
+                    "냉장고 이름을 입력해 주세요."
                 )
 
-                candidate = {
-                    "name": name,
-                    "amount": item.get("amount"),
-                    "unit": item.get("unit") or "",
-                    "expiry_date": (
-                        expiry.isoformat()
-                        if expiry
-                        else None
-                    ),
-                }
+            else:
+                fridge_id = str(uuid4())
 
-                if key not in merged:
-                    merged[key] = candidate
+                try:
+                    client.table("family_refrigerators").insert(
+                        {
+                            "id": fridge_id,
+                            "user_id": user_id,
+                            "name": name,
+                            "ingredients": [],
+                        },
+                        returning="minimal",
+                    ).execute()
 
-                else:
-                    if (
-                        merged[key]["amount"],
-                        merged[key]["unit"],
-                    ) != (
-                        candidate["amount"],
-                        candidate["unit"],
-                    ):
-                        merged[key]["amount"] = None
-                        merged[key]["unit"] = ""
-                        conflicts.add(merged[key]["name"])
-
-                    if (
-                        merged[key].get("expiry_date")
-                        != candidate["expiry_date"]
-                    ):
-                        dates = [
-                            value
-                            for value in [
-                                merged[key].get("expiry_date"),
-                                candidate["expiry_date"],
-                            ]
-                            if value
-                        ]
-
-                        merged[key]["expiry_date"] = (
-                            min(dates)
-                            if dates
-                            else None
+                except Exception as error:
+                    if str(
+                        getattr(error, "code", "")
+                    ) == "23505":
+                        st.warning(
+                            "이미 사용 중인 냉장고 이름이에요. "
+                            "다른 이름을 입력해 주세요."
                         )
 
-                        conflicts.add(merged[key]["name"])
+                    else:
+                        show_error(
+                            "냉장고 생성 결과를 확인하지 못했어요. "
+                            "목록을 새로 불러와 확인해 주세요.",
+                            error,
+                        )
 
-        if len(rows) < 1000:
-            break
+                else:
+                    st.session_state[
+                        f"fridge_pending_{user_id}"
+                    ] = fridge_id
 
-        offset += 1000
+                    st.session_state[
+                        f"meal_notice_{user_id}"
+                    ] = f"‘{name}’을 만들었어요."
 
-    return list(merged.values()), sorted(conflicts)
+                    st.rerun()
+
+    if not fridges:
+        st.info(
+            "냉장고를 하나 이상 만들어 주세요."
+        )
+        st.stop()
+
+    fridge_map = {
+        item["id"]: item
+        for item in fridges
+    }
+
+    choice_key = f"active_fridge_{user_id}"
+
+    pending = st.session_state.pop(
+        f"fridge_pending_{user_id}",
+        None,
+    )
+
+    if pending in fridge_map:
+        st.session_state[choice_key] = pending
+
+    if st.session_state.get(choice_key) not in fridge_map:
+        st.session_state[choice_key] = fridges[0]["id"]
+
+    selected_id = st.selectbox(
+        "재료를 확인하거나 사용할 냉장고",
+        list(fridge_map),
+        format_func=lambda value: fridge_map[value]["name"],
+        key=choice_key,
+    )
+
+    fridge = fridge_map[selected_id]
+
+    st.info(
+        f"현재 냉장고: {fridge['name']} · "
+        f"현재 재료 {len(fridge.get('ingredients') or [])}종류"
+    )
+
+    with st.expander("✏️ 선택한 냉장고 이름 변경"):
+        with st.form(
+            f"fridge_rename_{user_id}_{selected_id}_"
+            f"{fingerprint(fridge['name'])}"
+        ):
+            rename = st.text_input(
+                "새 냉장고 이름",
+                value=fridge["name"],
+                max_chars=50,
+            )
+
+            saved = st.form_submit_button(
+                "이름 변경 저장",
+                use_container_width=True,
+            )
+
+        if saved:
+            name = rename.strip()
+
+            if not name:
+                st.warning(
+                    "냉장고 이름을 입력해 주세요."
+                )
+
+            elif name == fridge["name"]:
+                st.info(
+                    "현재와 동일한 이름이에요."
+                )
+
+            else:
+                try:
+                    result = (
+                        client.table("family_refrigerators")
+                        .update(
+                            {"name": name},
+                            returning="representation",
+                        )
+                        .eq("user_id", user_id)
+                        .eq("id", selected_id)
+                        .execute()
+                    )
+
+                    if not result.data:
+                        raise ValueError(
+                            "변경된 냉장고가 없어요."
+                        )
+
+                except Exception as error:
+                    if str(
+                        getattr(error, "code", "")
+                    ) == "23505":
+                        st.warning(
+                            "이미 사용 중인 냉장고 이름이에요."
+                        )
+
+                    else:
+                        show_error(
+                            "냉장고 이름 변경 결과를 확인하지 못했어요.",
+                            error,
+                        )
+
+                else:
+                    st.session_state[
+                        f"meal_notice_{user_id}"
+                    ] = "냉장고 이름을 변경했어요."
+
+                    st.rerun()
+
+    return fridge
 
 
 def save_conditions(
@@ -334,7 +452,7 @@ except Exception as error:
 st.title("🍽️ 냉장고 식단 추천")
 
 st.caption(
-    "냉장고 재료는 같은 계정의 가족이 공유하고, "
+    "냉장고는 이름을 정해 여러 개 만들고 선택할 수 있으며, "
     "식사 조건은 관리 대상별로 저장해요."
 )
 
@@ -373,7 +491,7 @@ if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
 
-# 사이드바 관리 대상 선택
+# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
@@ -419,9 +537,12 @@ scope = f"{user.id}_{profile_id}"
 is_person = profile["profile_type"] == "사람"
 
 
-# 공유 냉장고·현재 대상 식사 조건 조회
+# 冷蔵庫選択と対象別条件
 try:
-    fridge = read_fridge(client, user.id)
+    fridge = show_fridge_picker(
+        client,
+        user.id,
+    )
 
     saved_rows = (
         client.table("meal_settings")
@@ -439,8 +560,8 @@ try:
 
 except Exception as error:
     show_error(
-        "공유 냉장고 또는 식사 조건을 불러오지 못했어요. "
-        "공유 냉장고 SQL 실행 여부도 확인해 주세요.",
+        "냉장고 또는 식사 조건을 불러오지 못했어요. "
+        "여러 냉장고용 SQL 실행 여부도 확인해 주세요.",
         error,
     )
     st.stop()
@@ -457,79 +578,8 @@ if notice:
     st.success(notice)
 
 
-# 공유 냉장고 최초 생성
-if fridge is None:
-    st.subheader("🧊 가족 공유 냉장고 시작하기")
-
-    st.write(
-        "처음 한 번, 이 계정의 모든 관리 대상에 저장된 "
-        "재료를 합쳐 공유 냉장고를 만들어요."
-    )
-
-    st.caption(
-        "같은 이름의 재료는 한 줄로 합쳐요. "
-        "보유량이나 단위가 다르면 양을 비워 두고, "
-        "기한이 다르면 입력된 날짜 중 빠른 날짜를 사용해요. "
-        "통합 후 확인해 주세요. "
-        "기존 대상별 저장 자료는 삭제하지 않아요."
-    )
-
-    if st.button(
-        "🧊 기존 재료를 합쳐 공유 냉장고 만들기",
-        type="primary",
-    ):
-        try:
-            ingredients, conflicts = collect_legacy_ingredients(
-                client,
-                user.id,
-            )
-
-            client.table("family_fridges").insert({
-                "user_id": user.id,
-                "ingredients": ingredients,
-            }).execute()
-
-        except Exception as error:
-            show_error(
-                "공유 냉장고 생성 결과를 확인하지 못했어요. "
-                "페이지를 다시 열어 확인해 주세요.",
-                error,
-            )
-
-        else:
-            st.session_state[
-                f"meal_notice_{user.id}"
-            ] = (
-                "기존 재료를 복사해 "
-                "가족 공유 냉장고를 만들었어요."
-            )
-
-            st.session_state[
-                f"meal_import_conflicts_{user.id}"
-            ] = conflicts
-
-            st.rerun()
-
-    st.stop()
-
-
-conflicts = st.session_state.get(
-    f"meal_import_conflicts_{user.id}",
-    [],
-)
-
-if conflicts:
-    st.warning(
-        "기존 기록의 보유량·단위 또는 기한이 달라 "
-        "확인이 필요한 재료: "
-        + ", ".join(conflicts)
-    )
-
-    st.caption(
-        "아래에서 실제 보유량과 기한을 확인한 뒤 "
-        "공유 냉장고를 저장해 주세요."
-    )
-
+fridge_id = fridge["id"]
+fridge_name = fridge["name"]
 
 saved_ingredients = fridge.get("ingredients") or []
 fridge_revision = fingerprint(fridge)
@@ -540,12 +590,12 @@ revision = fingerprint({
 })
 
 
-# 공유 냉장고 입력
-st.subheader("🧊 우리 가족 공유 냉장고")
+# 선택한 냉장고 재료 입력
+st.subheader(f"🧊 {fridge_name}의 재료")
 
 st.caption(
-    "어떤 관리 대상을 선택해도 같은 재료가 보여요. "
-    "여기서 저장하거나 비우면 이 계정 전체에 적용돼요."
+    "재료 저장·삭제·초기화는 위에서 선택한 냉장고에만 적용돼요. "
+    "식사 조건의 관리 대상은 왼쪽 사이드바에서 선택해 주세요."
 )
 
 ingredient_rows = [
@@ -649,7 +699,7 @@ with st.form(
     )
 
     save_fridge_clicked = st.form_submit_button(
-        "💾 공유 냉장고 재료 저장",
+        "💾 선택한 냉장고 재료 저장",
         use_container_width=True,
     )
 
@@ -666,18 +716,19 @@ if save_fridge_clicked:
         )
 
         result = (
-            client.table("family_fridges")
+            client.table("family_refrigerators")
             .update(
                 {"ingredients": ingredients},
                 returning="representation",
             )
             .eq("user_id", user.id)
+            .eq("id", fridge_id)
             .execute()
         )
 
         if not result.data:
             raise ValueError(
-                "저장된 공유 냉장고를 확인하지 못했어요."
+                "선택한 냉장고의 저장 결과를 확인하지 못했어요."
             )
 
     except ValueError as error:
@@ -691,17 +742,9 @@ if save_fridge_clicked:
         )
 
     else:
-        st.session_state.pop(
-            f"meal_import_conflicts_{user.id}",
-            None,
-        )
-
         st.session_state[
             f"meal_notice_{user.id}"
-        ] = (
-            "공유 냉장고 재료를 저장했어요. "
-            "같은 계정의 모든 대상에게 적용돼요."
-        )
+        ] = f"‘{fridge_name}’의 재료를 저장했어요."
 
         st.rerun()
 
@@ -719,8 +762,8 @@ st.caption(
 
 if not is_person:
     st.info(
-        "반려동물도 공유 냉장고와 개별 식사 조건을 "
-        "저장할 수 있어요. 강아지를 선택하면 아래에서 "
+        "반려동물도 선택한 냉장고와 개별 식사 조건을 "
+        "이용할 수 있어요. 강아지를 선택하면 아래에서 "
         "토핑·간식 후보를 추천받을 수 있어요."
     )
 
@@ -842,14 +885,14 @@ if save_conditions_clicked:
         st.rerun()
 
 
-# 저장된 재료와 상태
+# 저장된 재료와 조건 확인
 st.divider()
 st.markdown("### 📋 현재 저장된 내용")
 
 c1, c2, c3 = st.columns(3)
 
 c1.metric(
-    "공유 냉장고 재료",
+    "선택한 냉장고 재료",
     f"{len(saved_ingredients)}종류",
 )
 
@@ -902,7 +945,7 @@ if saved_ingredients:
 
 else:
     st.caption(
-        "공유 냉장고에 저장된 재료가 없어요."
+        "선택한 냉장고에 저장된 재료가 없어요."
     )
 
 
@@ -935,7 +978,7 @@ st.caption(
 )
 
 
-# 기한이 지난 재료 선택 삭제
+# 선택한 냉장고의 기한 지난 재료 삭제
 expired_indices = [
     index
     for index, item in enumerate(saved_ingredients)
@@ -955,8 +998,8 @@ with st.expander(
 
     else:
         st.warning(
-            "삭제하면 같은 계정의 모든 가족과 반려동물의 "
-            "냉장고 목록에서 사라져요."
+            f"삭제하면 ‘{fridge_name}’에서만 재료가 사라져요. "
+            "다른 냉장고의 재료는 유지돼요."
         )
 
         st.caption(
@@ -994,6 +1037,7 @@ with st.expander(
                     current = read_fridge(
                         client,
                         user.id,
+                        fridge_id,
                     )
 
                     if (
@@ -1034,12 +1078,13 @@ with st.expander(
                     ]
 
                     result = (
-                        client.table("family_fridges")
+                        client.table("family_refrigerators")
                         .update(
                             {"ingredients": remaining},
                             returning="representation",
                         )
                         .eq("user_id", user.id)
+                        .eq("id", fridge_id)
                         .execute()
                     )
 
@@ -1072,10 +1117,12 @@ with st.expander(
                     st.rerun()
 
 
-# 공유 냉장고·식사 조건 초기화
-with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
+# 선택한 냉장고·현재 대상 식사 조건 초기화
+with st.expander(
+    "🗑️ 선택한 냉장고·식사 조건 초기화"
+):
     st.write(
-        f"공유 냉장고: **이 계정 전체** / "
+        f"냉장고: **{fridge_name}** / "
         f"식사 조건: **{profile['name']}만**"
     )
 
@@ -1090,9 +1137,9 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
 
     if reset_type in ["ingredients", "all"]:
         st.warning(
-            f"공유 냉장고 재료 {len(saved_ingredients)}종류를 "
-            "모두 비워요. 다른 가족과 반려동물이 보는 "
-            "재료도 함께 비워져요."
+            f"재료 {len(saved_ingredients)}종류를 "
+            f"‘{fridge_name}’에서 모두 비워요. "
+            "다른 냉장고의 재료는 유지돼요."
         )
 
     if reset_type in ["conditions", "all"]:
@@ -1108,9 +1155,9 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
         )
 
     st.caption(
-        "다른 대상의 식사 조건과 혈당·식사·활동 기록은 "
-        "유지돼요. 초기화한 현재 자료는 앱에서 복구할 수 없어요. "
-        "이전 대상별 재료 사본은 자동으로 다시 가져오지 않아요."
+        "다른 대상의 식사 조건과 혈당·식사·활동 기록은 유지돼요. "
+        "초기화한 현재 자료는 앱에서 복구할 수 없어요. "
+        "다른 냉장고의 재료도 유지돼요."
     )
 
     reset_has_data = (
@@ -1128,7 +1175,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
         f"meal_reset_form_{scope}_{revision}_{reset_type}"
     ):
         confirm_reset = st.checkbox(
-            "공유 냉장고는 계정 전체에 적용되며, "
+            f"선택한 냉장고 ‘{fridge_name}’과 현재 관리 대상에 대해 "
             "선택한 항목이 초기화되는 것을 확인했어요."
         )
 
@@ -1164,28 +1211,24 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
             try:
                 if reset_type in ["ingredients", "all"]:
                     result = (
-                        client.table("family_fridges")
+                        client.table("family_refrigerators")
                         .update(
                             {"ingredients": []},
                             returning="representation",
                         )
                         .eq("user_id", user.id)
+                        .eq("id", fridge_id)
                         .execute()
                     )
 
                     if not result.data:
                         raise ValueError(
-                            "공유 냉장고 초기화 결과를 "
+                            "선택한 냉장고 초기화 결과를 "
                             "확인하지 못했어요."
                         )
 
                     completed.append(
-                        "계정 전체의 공유 냉장고 재료"
-                    )
-
-                    st.session_state.pop(
-                        f"meal_import_conflicts_{user.id}",
-                        None,
+                        f"‘{fridge_name}’의 재료"
                     )
 
                 if (
@@ -1219,8 +1262,7 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
 
                 show_error(
                     "일부 요청의 처리 결과를 확인하지 못했어요. "
-                    "페이지를 다시 열어 각 저장 내용을 "
-                    "확인해 주세요.",
+                    "페이지를 다시 열어 각 저장 내용을 확인해 주세요.",
                     error,
                 )
 
@@ -1237,7 +1279,12 @@ with st.expander("🗑️ 공유 냉장고·식사 조건 초기화"):
                 st.rerun()
 
 
-# 기한이 지난 재료와 잘못된 날짜의 재료는 AI에서 제외
+# 선택한 냉장고 재료로 AI 추천
+st.info(
+    f"AI 추천에 사용할 냉장고: {fridge_name} / "
+    f"관리 대상: {profile['name']}"
+)
+
 ai_today = get_local_now().date()
 
 ai_ingredients = []
