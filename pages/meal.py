@@ -7,11 +7,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-from app_shared import (
-    require_login,
-    get_timezone_name,
-    get_local_now,
-)
+from app_shared import require_login, get_timezone_name, get_local_now
 from meal_ai import show_meal_recommendations
 from sidebar_menu import show_sidebar_menu
 
@@ -94,8 +90,8 @@ def clean_ingredients(rows):
 
     for index, row in enumerate(rows, start=1):
         name = str(row.get("재료명") or "").strip()
-
         raw_amount = row.get("보유량")
+
         amount = (
             None
             if raw_amount is None
@@ -105,7 +101,9 @@ def clean_ingredients(rows):
         unit = str(row.get("단위") or "").strip()
 
         try:
-            expiry = parse_expiry(row.get("유통·소비기한"))
+            expiry = parse_expiry(
+                row.get("유통·소비기한")
+            )
 
         except (ValueError, TypeError):
             raise ValueError(
@@ -220,9 +218,7 @@ def show_fridge_picker(client, user_id):
             name = new_name.strip()
 
             if not name:
-                st.warning(
-                    "냉장고 이름을 입력해 주세요."
-                )
+                st.warning("냉장고 이름을 입력해 주세요.")
 
             else:
                 fridge_id = str(uuid4())
@@ -266,9 +262,7 @@ def show_fridge_picker(client, user_id):
                     st.rerun()
 
     if not fridges:
-        st.info(
-            "냉장고를 하나 이상 만들어 주세요."
-        )
+        st.info("냉장고를 하나 이상 만들어 주세요.")
         st.stop()
 
     fridge_map = {
@@ -323,14 +317,10 @@ def show_fridge_picker(client, user_id):
             name = rename.strip()
 
             if not name:
-                st.warning(
-                    "냉장고 이름을 입력해 주세요."
-                )
+                st.warning("냉장고 이름을 입력해 주세요.")
 
             elif name == fridge["name"]:
-                st.info(
-                    "현재와 동일한 이름이에요."
-                )
+                st.info("현재와 동일한 이름이에요.")
 
             else:
                 try:
@@ -430,7 +420,6 @@ client, user = require_login()
 timezone_name = get_timezone_name()
 
 
-# 관리 대상 조회
 try:
     profiles = (
         client.table("care_profiles")
@@ -491,7 +480,6 @@ if st.session_state.get("active_profile") not in profile_map:
     st.session_state.active_profile = profiles[0]["id"]
 
 
-# 관리 대상 선택
 with profile_menu:
     st.caption("관리 대상")
 
@@ -537,7 +525,6 @@ scope = f"{user.id}_{profile_id}"
 is_person = profile["profile_type"] == "사람"
 
 
-# 冷蔵庫選択と対象別条件
 try:
     fridge = show_fridge_picker(
         client,
@@ -569,6 +556,7 @@ except Exception as error:
 
 settings = saved_rows[0] if saved_rows else {}
 
+# 냉장고 관련 알림
 notice = st.session_state.pop(
     f"meal_notice_{user.id}",
     None,
@@ -590,7 +578,7 @@ revision = fingerprint({
 })
 
 
-# 선택한 냉장고 재료 입력
+# 선택한 냉장고 재료
 st.subheader(f"🧊 {fridge_name}의 재료")
 
 st.caption(
@@ -853,6 +841,15 @@ with st.form(
         use_container_width=True,
     )
 
+    # 식사 조건 저장 성공 메시지는 버튼 바로 아래에 표시
+    conditions_notice = st.session_state.pop(
+        f"meal_conditions_notice_{scope}",
+        None,
+    )
+
+    if conditions_notice:
+        st.success(conditions_notice)
+
 
 if save_conditions_clicked:
     try:
@@ -879,7 +876,7 @@ if save_conditions_clicked:
 
     else:
         st.session_state[
-            f"meal_notice_{user.id}"
+            f"meal_conditions_notice_{scope}"
         ] = f"{profile['name']}의 식사 조건을 저장했어요."
 
         st.rerun()
@@ -978,7 +975,7 @@ st.caption(
 )
 
 
-# 선택한 냉장고의 기한 지난 재료 삭제
+# 기한이 지난 재료 선택 삭제
 expired_indices = [
     index
     for index, item in enumerate(saved_ingredients)
@@ -1117,7 +1114,7 @@ with st.expander(
                     st.rerun()
 
 
-# 선택한 냉장고·현재 대상 식사 조건 초기화
+# 선택한 냉장고·식사 조건 초기화
 with st.expander(
     "🗑️ 선택한 냉장고·식사 조건 초기화"
 ):
