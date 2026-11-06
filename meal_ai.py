@@ -13,7 +13,7 @@ from openai import (
     AuthenticationError,
     RateLimitError,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 
 from app_shared import get_local_now, get_timezone_name
 
@@ -63,7 +63,8 @@ class DailyMealPlan(BaseModel):
 
 SYSTEM_PROMPT = """
 너는 냉장고 재료를 활용하는 일반적인 요리 메뉴 제안 도우미다.
-한국어 존댓말로 아침, 점심, 저녁 메뉴를 각각 한 가지씩 제안한다.
+한국어 존댓말로 selected_meals에 지정된 끼니만 각각 한 가지씩 제안한다.
+선택하지 않은 끼니는 생성하지 않는다.
 메뉴 설명과 조리 단계 등 사용자에게 보이는 모든 문장은 존댓말로 작성한다.
 
 반드시 지킬 조건:
@@ -71,7 +72,7 @@ SYSTEM_PROMPT = """
 2. 각 끼니는 전달받은 인분 수를 기준으로 작성한다.
 3. 각 끼니의 조리 시간은 최대 조리 시간을 넘지 않는다.
 4. 제외할 음식과 재료를 메뉴, 양념, 추가 재료에 사용하지 않는다.
-5. 보유량이 있는 재료는 세 끼 전체 사용량을 고려한다.
+5. 보유량이 있는 재료는 선택한 끼니 전체 사용량을 고려한다.
 6. 보유량이 없으면 충분히 있다고 단정하지 않는다.
 7. 부족하거나 보유 목록에 없는 재료는 추가 재료에 명시한다.
 8. 소금, 기름, 양념도 보유 목록에 없으면 추가 재료에 명시한다.
@@ -91,7 +92,7 @@ additional_requests는 원하는 메뉴·조리 방식에 관한 선택적 선�
 충돌하거나 반영할 수 없는 요청을 반영했다고 주장하지 않는다.
 
 재료가 부족하면 추가로 필요한 재료를 분명히 표시한다.
-세 끼를 불필요하게 동일한 메뉴로 반복하지 않는다.
+선택한 끼니를 불필요하게 동일한 메뉴로 반복하지 않는다.
 답변은 지정된 구조에 맞춰 간결하게 작성한다.
 """
 
@@ -145,9 +146,7 @@ def resolve_target(profile):
     if profile.get("profile_type") == "사람":
         return "person"
 
-    animal_type = str(
-        profile.get("animal_type") or ""
-    ).strip()
+    animal_type = str(profile.get("animal_type") or "").strip()
 
     if animal_type in {"강아지", "개", "반려견"}:
         return "dog"
@@ -167,14 +166,10 @@ def ingredient_is_current(item, today):
     try:
         if isinstance(value, datetime):
             expiry = value.date()
-
         elif isinstance(value, date):
             expiry = value
-
         else:
-            expiry = date.fromisoformat(
-                str(value).strip()
-            )
+            expiry = date.fromisoformat(str(value).strip())
 
     except (ValueError, TypeError):
         return False
@@ -182,16 +177,71 @@ def ingredient_is_current(item, today):
     return expiry >= today
 
 
+def normalize_meals(selected_meals=None):
+    if selected_meals is None:
+        return [field for field, _ in MEAL_SECTIONS]
+
+    if not isinstance(selected_meals, (list, tuple)):
+        raise ValueError("추천받을 끼니를 확인해 주세요.")
+
+    allowed = {field for field, _ in MEAL_SECTIONS}
+
+    if any(field not in allowed for field in selected_meals):
+        raise ValueError("추천받을 끼니를 확인해 주세요.")
+
+    chosen = set(selected_meals)
+
+    if not chosen:
+        raise ValueError(
+            "추천받을 끼니를 한 개 이상 선택해 주세요."
+        )
+
+    return [
+        field
+        for field, _ in MEAL_SECTIONS
+        if field in chosen
+    ]
+
+
+def selected_sections(data):
+    if data.get("target") == "dog":
+        return DOG_SECTIONS
+
+    meals = normalize_meals(data.get("selected_meals"))
+
+    return [
+        (field, label)
+        for field, label in MEAL_SECTIONS
+        if field in meals
+    ]
+
+
+def response_model(request_data):
+    if request_data.get("target") == "dog":
+        return DailyMealPlan
+
+    meals = normalize_meals(
+        request_data.get("selected_meals")
+    )
+
+    return create_model(
+        "SelectedMealPlan_" + "_".join(meals),
+        **{
+            field: (MealSuggestion, ...)
+            for field in meals
+        },
+    )
+
+
 def build_request(
     settings,
     target="person",
     today=None,
     additional_requests="",
+    selected_meals=None,
 ):
     if target not in {"person", "dog"}:
-        raise ValueError(
-            "추천 대상을 확인해 주세요."
-        )
+        raise ValueError("추천 대상을 확인해 주세요.")
 
     additional_requests = str(
         additional_requests or ""
@@ -231,9 +281,7 @@ def build_request(
         if not ingredient_is_current(item, today):
             continue
 
-        name = str(
-            item.get("name") or ""
-        ).strip()
+        name = str(item.get("name") or "").strip()
 
         if not name or len(name) > 80:
             raise ValueError(
@@ -251,9 +299,7 @@ def build_request(
                     f"‘{name}’의 보유량을 확인해 주세요."
                 )
 
-        unit = str(
-            item.get("unit") or ""
-        ).strip()
+        unit = str(item.get("unit") or "").strip()
 
         if amount is not None and not unit:
             raise ValueError(
@@ -263,9 +309,7 @@ def build_request(
         cleaned.append({
             "name": name,
             "amount": amount,
-            "unit": (
-                unit if amount is not None else ""
-            ),
+            "unit": unit if amount is not None else "",
         })
 
     if not cleaned:
@@ -275,9 +319,7 @@ def build_request(
             "냉장고의 재료와 기한을 확인해 주세요."
         )
 
-    servings = int(
-        settings.get("servings", 1)
-    )
+    servings = int(settings.get("servings", 1))
     cooking_minutes = int(
         settings.get("max_cooking_minutes", 30)
     )
@@ -310,8 +352,7 @@ def build_request(
             item
             for item in cleaned
             if item["name"] in DOG_INGREDIENT_NAMES
-            and item["name"].casefold()
-            not in excluded_normalized
+            and item["name"].casefold() not in excluded_normalized
         ]
 
         if not cleaned:
@@ -331,6 +372,7 @@ def build_request(
 
     return {
         "target": "person",
+        "selected_meals": normalize_meals(selected_meals),
         "ingredients": cleaned,
         "excluded_foods": excluded_foods,
         "servings": servings,
@@ -346,9 +388,8 @@ def validate_plan(
 ):
     result = {}
     request_data = request_data or {}
-
     is_dog = request_data.get("target") == "dog"
-    sections = DOG_SECTIONS if is_dog else MEAL_SECTIONS
+    sections = selected_sections(request_data)
 
     allowed = {
         item["name"]
@@ -364,24 +405,20 @@ def validate_plan(
             )
 
         if not meal.ingredients or not all(
-            item.strip()
-            for item in meal.ingredients
+            item.strip() for item in meal.ingredients
         ):
             raise ValueError(
                 f"{label} 재료 목록을 받지 못했어요."
             )
 
         if not meal.steps or not all(
-            item.strip()
-            for item in meal.steps
+            item.strip() for item in meal.steps
         ):
             raise ValueError(
                 f"{label} 조리법을 받지 못했어요."
             )
 
-        if not (
-            1 <= meal.cooking_minutes <= max_cooking_minutes
-        ):
+        if not 1 <= meal.cooking_minutes <= max_cooking_minutes:
             raise ValueError(
                 "추천 조리 시간이 설정한 조건과 맞지 않아요. "
                 "다시 추천받아 주세요."
@@ -395,9 +432,7 @@ def validate_plan(
 
             if (
                 not used_names.intersection(allowed)
-                or not used_names.issubset(
-                    allowed | {"물"}
-                )
+                or not used_names.issubset(allowed | {"물"})
             ):
                 raise ValueError(
                     "강아지 후보에 전달하지 않은 재료가 "
@@ -450,12 +485,21 @@ def request_meal_plan(api_key, request_data):
         else SYSTEM_PROMPT
     )
 
-    request_message = (
-        "서로 대안이 되는 강아지 토핑·간식 "
-        "후보 세 가지를 추천해 주세요.\n"
-        if is_dog
-        else "아침·점심·저녁 메뉴를 추천해 주세요.\n"
-    )
+    if is_dog:
+        request_message = (
+            "서로 대안이 되는 강아지 토핑·간식 "
+            "후보 세 가지를 추천해 주세요.\n"
+        )
+    else:
+        names = "·".join(
+            label.split(" ", 1)[1]
+            for _, label in selected_sections(request_data)
+        )
+
+        request_message = (
+            f"{names} 메뉴만 각각 한 가지씩 추천해 주세요. "
+            "선택하지 않은 끼니는 작성하지 마세요.\n"
+        )
 
     with OpenAI(
         api_key=api_key,
@@ -482,14 +526,12 @@ def request_meal_plan(api_key, request_data):
                     ),
                 },
             ],
-            response_format=DailyMealPlan,
+            response_format=response_model(request_data),
             max_tokens=4000,
         )
 
     if not completion.choices:
-        raise ValueError(
-            "추천 결과를 받지 못했어요."
-        )
+        raise ValueError("추천 결과를 받지 못했어요.")
 
     message = completion.choices[0].message
 
@@ -514,7 +556,7 @@ def request_meal_plan(api_key, request_data):
 
 def render_plan(result):
     is_dog = result.get("target") == "dog"
-    sections = DOG_SECTIONS if is_dog else MEAL_SECTIONS
+    sections = selected_sections(result)
 
     if is_dog:
         st.caption(
@@ -546,8 +588,7 @@ def render_plan(result):
             st.subheader(meal["menu"])
 
             st.write(
-                f"예상 조리 시간: "
-                f"{meal['cooking_minutes']}분"
+                f"예상 조리 시간: {meal['cooking_minutes']}분"
             )
 
             st.markdown(
@@ -564,11 +605,8 @@ def render_plan(result):
             if meal["additional_ingredients"]:
                 for ingredient in meal["additional_ingredients"]:
                     st.write(f"• {ingredient}")
-
             else:
-                st.write(
-                    "추가 재료 없음으로 제안됐어요."
-                )
+                st.write("추가 재료 없음으로 제안됐어요.")
 
             st.markdown("**만드는 방법**")
 
@@ -596,7 +634,6 @@ def show_meal_recommendations(
 
     try:
         target = resolve_target(profile)
-
     except ValueError as error:
         st.info(str(error))
         return
@@ -605,9 +642,7 @@ def show_meal_recommendations(
 
     fridge_id = str(
         fridge_id
-        or st.session_state.get(
-            f"active_fridge_{user_id}"
-        )
+        or st.session_state.get(f"active_fridge_{user_id}")
         or ""
     )
 
@@ -645,7 +680,7 @@ def show_meal_recommendations(
     else:
         st.info(
             "선택한 냉장고의 저장된 재료·제외할 음식·"
-            "인분·조리 시간과 추가 요청사항으로 "
+            "인분·조리 시간으로 "
             "일반적인 요리 메뉴를 추천해요."
         )
 
@@ -656,11 +691,11 @@ def show_meal_recommendations(
     )
 
     st.warning(
-        "계정 정보·저장한 혈당·실제 식사 기록·"
-        "저장된 알레르기·의료진 또는 수의사 지침은 "
-        "자동으로 첨부하지 않아요. "
-        "추가 요청사항에도 개인정보·건강기록을 입력하지 마세요. "
-        "개인별 치료 식단이나 알레르기 안전 식단을 보장하지 않아요."
+        "이름·계정 ID·냉장고 ID·저장한 혈당·실제 식사 기록·"
+        "알레르기·의료진 또는 수의사 지침은 "
+        "자동으로 첨부하거나 반영하지 않아요. "
+        "개인별 치료 식단이나 "
+        "알레르기 안전 식단을 보장하지 않아요."
     )
 
     if is_dog:
@@ -681,20 +716,37 @@ def show_meal_recommendations(
     timezone_name = get_timezone_name()
     scope = f"{user_id}_{profile_id}_{target}"
 
+    selected_meals = None
+
+    if not is_dog:
+        labels = dict(MEAL_SECTIONS)
+
+        selected_meals = st.multiselect(
+            "추천받을 끼니",
+            options=list(labels),
+            default=list(labels),
+            format_func=lambda field: labels[field],
+            key=f"meal_ai_meals_{scope}_{fingerprint(fridge_id)}",
+        )
+
+        st.caption(
+            "아침·점심·저녁 중 원하는 끼니를 한 개 이상 "
+            "선택해 주세요. 선택한 끼니만 추천해요."
+        )
+
     additional_requests = st.text_area(
         "추가 요청사항(선택)",
         placeholder=(
             "예: 국물 없는 메뉴로 추천해 주세요. "
             "설거지가 적게 나오는 간단한 요리면 좋겠어요."
             if not is_dog
-            else
-            "예: 찌는 방식으로 간단하게 준비할 수 있는 후보를 추천해 주세요."
+            else (
+                "예: 찌는 방식으로 간단하게 준비할 수 있는 "
+                "후보를 추천해 주세요."
+            )
         ),
         max_chars=1000,
-        key=(
-            f"meal_ai_extra_{scope}_"
-            f"{fingerprint(fridge_id)}"
-        ),
+        key=f"meal_ai_extra_{scope}_{fingerprint(fridge_id)}",
     )
 
     st.caption(
@@ -710,13 +762,10 @@ def show_meal_recommendations(
             target,
             today=local_today,
             additional_requests=additional_requests,
+            selected_meals=selected_meals,
         )
 
-    except (
-        ValueError,
-        TypeError,
-        OverflowError,
-    ) as error:
+    except (ValueError, TypeError, OverflowError) as error:
         st.warning(str(error))
         return
 
@@ -744,7 +793,7 @@ def show_meal_recommendations(
             + (
                 "강아지 / 토핑·간식 후보"
                 if is_dog
-                else "사람 / 세 끼 메뉴"
+                else "사람 / 선택한 끼니 메뉴"
             )
         )
 
@@ -776,8 +825,15 @@ def show_meal_recommendations(
 
         if not is_dog:
             st.write(
-                f"한 끼 인분 수: "
-                f"{request_data['servings']}인분"
+                "추천받을 끼니: "
+                + " · ".join(
+                    label
+                    for _, label in selected_sections(request_data)
+                )
+            )
+
+            st.write(
+                f"한 끼 인분 수: {request_data['servings']}인분"
             )
 
         else:
@@ -792,7 +848,7 @@ def show_meal_recommendations(
         )
 
         st.write(
-            "추가 요청사항: "
+            "이번 추천의 추가 요청사항: "
             + (
                 request_data["additional_requests"]
                 or "입력 없음"
@@ -811,13 +867,13 @@ def show_meal_recommendations(
         f"meal_ai_result_{scope}_{fingerprint(fridge_id)}"
     )
 
-    last_request_key = (
-        f"meal_ai_last_request_{scope}"
-    )
+    last_request_key = f"meal_ai_last_request_{scope}"
 
+    # 계정·냉장고 정보는 앱 내부의 결과 구분에만 사용해요.
+    # AI에는 request_data만 전달해요.
     request_version = fingerprint({
         "request_data": request_data,
-        "response_style": "polite_v1",
+        "response_style": "selected_meals_v1",
         "fridge_id": fridge_id,
         "local_date": local_today.isoformat(),
         "timezone": timezone_name,
@@ -836,7 +892,7 @@ def show_meal_recommendations(
     button_label = (
         "🐶 선택된 재료를 Gemini로 보내고 후보 추천받기"
         if is_dog
-        else "🍽️ 재료를 Gemini로 보내고 하루 메뉴 추천받기"
+        else "🍽️ 선택한 끼니 메뉴 추천받기"
     )
 
     generate = st.button(
@@ -860,14 +916,12 @@ def show_meal_recommendations(
             )
 
         else:
-            st.session_state[last_request_key] = (
-                time.monotonic()
-            )
+            st.session_state[last_request_key] = time.monotonic()
 
             spinner_message = (
                 "토핑·간식 후보를 만들고 있어요…"
                 if is_dog
-                else "세 끼 메뉴를 만들고 있어요…"
+                else "선택한 끼니의 메뉴를 만들고 있어요…"
             )
 
             try:
@@ -936,10 +990,9 @@ def show_meal_recommendations(
                     "request_version": request_version,
                     "target": target,
                     "servings": request_data.get("servings"),
+                    "selected_meals": request_data.get("selected_meals"),
                     "created_at": (
-                        get_local_now().strftime(
-                            "%Y-%m-%d %H:%M"
-                        )
+                        get_local_now().strftime("%Y-%m-%d %H:%M")
                         + f" ({timezone_name})"
                     ),
                     "plan": plan,
@@ -948,7 +1001,7 @@ def show_meal_recommendations(
                 st.success(
                     "강아지 토핑·간식 후보를 만들었어요."
                     if is_dog
-                    else "아침·점심·저녁 메뉴를 만들었어요."
+                    else "선택한 끼니의 메뉴를 만들었어요."
                 )
 
     result = st.session_state.get(result_key)
@@ -956,8 +1009,8 @@ def show_meal_recommendations(
     if result:
         if result["request_version"] != request_version:
             st.info(
-                "재료·조건·추가 요청사항·날짜·시간대 또는 "
-                "추천 안내 방식이 바뀌었어요. "
+                "선택한 끼니·재료·조건·추가 요청사항·날짜·시간대 "
+                "또는 추천 안내 방식이 바뀌었어요. "
                 "현재 기준으로 다시 추천받아 주세요."
             )
 
