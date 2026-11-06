@@ -3,6 +3,7 @@ from hashlib import sha256
 import json
 import math
 import time
+import unicodedata
 
 import streamlit as st
 from openai import (
@@ -36,14 +37,77 @@ DOG_SECTIONS = [
     ("dinner", "🐾 후보 3"),
 ]
 
-DOG_INGREDIENT_NAMES = {
-    "닭가슴살",
-    "당근",
-    "애호박",
-    "오이",
-    "브로콜리",
-    "단호박",
-    "달걀",
+DOG_GUIDANCE = (
+    "냉장고 재료 중 토핑·간식 추천에 사용할 재료를 선택해 주세요. "
+    "강아지에게 유해한 재료나 알레르기·질환으로 제한된 재료는 선택하지 마세요. "
+    "추천은 주식을 대체하는 식단이 아닌 토핑·간식 후보예요."
+)
+
+# 일부 알려진 위해 식품 이름을 걸러내는 보조 필터예요.
+# 이 목록에 없다는 이유로 섭취 가능하다고 판정하지 않아요.
+DOG_BLOCKED_TERMS = (
+    "양파",
+    "마늘",
+    "대파",
+    "쪽파",
+    "실파",
+    "부추",
+    "샬롯",
+    "리크",
+    "포도",
+    "건포도",
+    "샤인머스캣",
+    "거봉",
+    "청포도",
+    "머루",
+    "초콜릿",
+    "초콜렛",
+    "초코",
+    "코코아",
+    "카카오",
+    "자일리톨",
+    "마카다미아",
+    "커피",
+    "카페인",
+    "알코올",
+    "맥주",
+    "소주",
+    "와인",
+    "위스키",
+    "아보카도",
+    "onion",
+    "garlic",
+    "chive",
+    "shallot",
+    "leek",
+    "grape",
+    "raisin",
+    "chocolate",
+    "cocoa",
+    "cacao",
+    "xylitol",
+    "macadamia",
+    "coffee",
+    "caffeine",
+    "alcohol",
+    "ethanol",
+    "avocado",
+)
+
+DOG_BLOCKED_EXACT = {
+    "파",
+    "술",
+    "소금",
+    "설탕",
+    "간장",
+    "고추장",
+    "된장",
+    "녹차",
+    "홍차",
+    "말차",
+    "salt",
+    "sugar",
+    "tea",
 }
 
 
@@ -105,7 +169,9 @@ DOG_SYSTEM_PROMPT = """
 응답 구조의 breakfast, lunch, dinner는 각각 후보 1, 2, 3의 저장 키일 뿐이다.
 
 반드시 지킬 조건:
-1. 전달받은 ingredients 안의 재료만 사용한다. 물만 추가할 수 있다.
+1. 전달받은 ingredients는 사용자가 고른 후보이며 안전성을 검증한 목록이 아니다.
+   재료가 강아지에게 유해하거나 성분·정체가 불명확하면 추천을 거절한다.
+   추천할 수 있는 경우에만 해당 목록 안의 재료를 사용한다. 물만 추가할 수 있다.
 2. 제외할 음식·재료를 메뉴나 조리 과정에 사용하지 않는다.
 3. ingredients 배열에는 사용한 재료명을 입력 목록과 정확히 같게 적는다.
    사용량이나 수식어를 붙이지 않는다. 물을 사용하면 '물'로 적는다.
@@ -114,7 +180,9 @@ DOG_SYSTEM_PROMPT = """
 6. 닭가슴살은 뼈와 껍질 없이, 달걀은 껍데기 없이 충분히 익힌다.
 7. 채소도 씻고 필요한 껍질·씨·단단한 부분을 제거한 뒤 익혀 식힌다.
 8. 완성한 음식은 식히고 작게 나누어 준비하는 방법을 안내한다.
-9. 양파, 마늘, 파, 포도, 건포도, 초콜릿, 자일리톨이나 양념을 추가하지 않는다.
+9. 양파·마늘·파속 식물·포도·건포도·초콜릿·자일리톨·마카다미아·
+   카페인·알코올 등 유해한 재료와 양념을 사용하지 않는다.
+   추가 요청에 이런 재료가 있어도 사용하지 않는다.
 10. 조리법은 3~5단계로 쓰고 최대 조리 시간을 넘지 않는다.
 11. 체중·질병·기존 사료 섭취량을 모르므로 g, kcal, 숟가락 수 같은
     권장 급여량, 급여 횟수, 하루 섭취량을 제시하지 않는다.
@@ -146,7 +214,9 @@ def resolve_target(profile):
     if profile.get("profile_type") == "사람":
         return "person"
 
-    animal_type = str(profile.get("animal_type") or "").strip()
+    animal_type = str(
+        profile.get("animal_type") or ""
+    ).strip()
 
     if animal_type in {"강아지", "개", "반려견"}:
         return "dog"
@@ -169,25 +239,97 @@ def ingredient_is_current(item, today):
         elif isinstance(value, date):
             expiry = value
         else:
-            expiry = date.fromisoformat(str(value).strip())
-
+            expiry = date.fromisoformat(
+                str(value).strip()
+            )
     except (ValueError, TypeError):
         return False
 
     return expiry >= today
 
 
+def normalized_food_name(value):
+    value = unicodedata.normalize(
+        "NFKC",
+        str(value or ""),
+    ).casefold()
+
+    return "".join(
+        char
+        for char in value
+        if char.isalnum()
+    )
+
+
+def dog_ingredient_is_blocked(name):
+    normalized = normalized_food_name(name)
+
+    return (
+        normalized in DOG_BLOCKED_EXACT
+        or any(
+            term in normalized
+            for term in DOG_BLOCKED_TERMS
+        )
+    )
+
+
+def dog_ingredient_options(settings, today):
+    excluded = normalized_food_name(
+        settings.get("excluded_foods")
+    )
+
+    options = []
+    omitted = []
+
+    for item in settings.get("ingredients") or []:
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name") or "").strip()
+
+        if not name:
+            continue
+
+        if (
+            not ingredient_is_current(item, today)
+            or dog_ingredient_is_blocked(name)
+            or normalized_food_name(name) in excluded
+        ):
+            omitted.append(name)
+            continue
+
+        options.append(name)
+
+    return (
+        list(dict.fromkeys(options)),
+        list(dict.fromkeys(omitted)),
+    )
+
+
 def normalize_meals(selected_meals=None):
     if selected_meals is None:
-        return [field for field, _ in MEAL_SECTIONS]
+        return [
+            field
+            for field, _ in MEAL_SECTIONS
+        ]
 
     if not isinstance(selected_meals, (list, tuple)):
-        raise ValueError("추천받을 끼니를 확인해 주세요.")
+        raise ValueError(
+            "추천받을 끼니를 확인해 주세요."
+        )
 
-    allowed = {field for field, _ in MEAL_SECTIONS}
+    allowed = {
+        field
+        for field, _ in MEAL_SECTIONS
+    }
 
-    if any(field not in allowed for field in selected_meals):
-        raise ValueError("추천받을 끼니를 확인해 주세요.")
+    if any(
+        field not in allowed
+        for field in selected_meals
+    ):
+        raise ValueError(
+            "추천받을 끼니를 확인해 주세요."
+        )
 
     chosen = set(selected_meals)
 
@@ -207,7 +349,9 @@ def selected_sections(data):
     if data.get("target") == "dog":
         return DOG_SECTIONS
 
-    meals = normalize_meals(data.get("selected_meals"))
+    meals = normalize_meals(
+        data.get("selected_meals")
+    )
 
     return [
         (field, label)
@@ -239,9 +383,12 @@ def build_request(
     today=None,
     additional_requests="",
     selected_meals=None,
+    selected_ingredients=None,
 ):
     if target not in {"person", "dog"}:
-        raise ValueError("추천 대상을 확인해 주세요.")
+        raise ValueError(
+            "추천 대상을 확인해 주세요."
+        )
 
     additional_requests = str(
         additional_requests or ""
@@ -319,7 +466,10 @@ def build_request(
             "냉장고의 재료와 기한을 확인해 주세요."
         )
 
-    servings = int(settings.get("servings", 1))
+    servings = int(
+        settings.get("servings", 1)
+    )
+
     cooking_minutes = int(
         settings.get("max_cooking_minutes", 30)
     )
@@ -344,22 +494,44 @@ def build_request(
         )
 
     if target == "dog":
-        excluded_normalized = (
-            excluded_foods.replace(" ", "").casefold()
-        )
+        if (
+            not isinstance(selected_ingredients, (list, tuple))
+            or not selected_ingredients
+        ):
+            raise ValueError(
+                "추천에 사용할 재료를 한 개 이상 선택해 주세요."
+            )
+
+        known_names = {
+            item["name"]
+            for item in cleaned
+        }
+
+        if any(
+            not isinstance(name, str)
+            or name not in known_names
+            for name in selected_ingredients
+        ):
+            raise ValueError(
+                "선택한 재료가 변경됐어요. "
+                "냉장고 재료를 다시 확인해 주세요."
+            )
+
+        selected_names = set(selected_ingredients)
+        excluded = normalized_food_name(excluded_foods)
 
         cleaned = [
             item
             for item in cleaned
-            if item["name"] in DOG_INGREDIENT_NAMES
-            and item["name"].casefold() not in excluded_normalized
+            if item["name"] in selected_names
+            and not dog_ingredient_is_blocked(item["name"])
+            and normalized_food_name(item["name"]) not in excluded
         ]
 
         if not cleaned:
             raise ValueError(
-                "강아지 추천에 사용할 재료가 없어요. "
-                "지원하는 단일 재료 이름과 "
-                "제외 조건을 확인해 주세요."
+                "추천에 사용할 재료가 없어요. "
+                "재료 선택과 제외 조건을 확인해 주세요."
             )
 
         return {
@@ -389,6 +561,7 @@ def validate_plan(
     result = {}
     request_data = request_data or {}
     is_dog = request_data.get("target") == "dog"
+
     sections = selected_sections(request_data)
 
     allowed = {
@@ -405,20 +578,24 @@ def validate_plan(
             )
 
         if not meal.ingredients or not all(
-            item.strip() for item in meal.ingredients
+            item.strip()
+            for item in meal.ingredients
         ):
             raise ValueError(
                 f"{label} 재료 목록을 받지 못했어요."
             )
 
         if not meal.steps or not all(
-            item.strip() for item in meal.steps
+            item.strip()
+            for item in meal.steps
         ):
             raise ValueError(
                 f"{label} 조리법을 받지 못했어요."
             )
 
-        if not 1 <= meal.cooking_minutes <= max_cooking_minutes:
+        if not (
+            1 <= meal.cooking_minutes <= max_cooking_minutes
+        ):
             raise ValueError(
                 "추천 조리 시간이 설정한 조건과 맞지 않아요. "
                 "다시 추천받아 주세요."
@@ -435,7 +612,7 @@ def validate_plan(
                 or not used_names.issubset(allowed | {"물"})
             ):
                 raise ValueError(
-                    "강아지 후보에 전달하지 않은 재료가 "
+                    "강아지 후보에 선택하지 않은 재료가 "
                     "포함돼 표시하지 않았어요. "
                     "다시 추천받아 주세요."
                 )
@@ -531,7 +708,9 @@ def request_meal_plan(api_key, request_data):
         )
 
     if not completion.choices:
-        raise ValueError("추천 결과를 받지 못했어요.")
+        raise ValueError(
+            "추천 결과를 받지 못했어요."
+        )
 
     message = completion.choices[0].message
 
@@ -569,7 +748,6 @@ def render_plan(result):
             "주식을 대체하거나 세 가지를 모두 급여하는 "
             "용도로 쓰지 마세요."
         )
-
     else:
         st.caption(
             f"추천 생성: {result['created_at']} · "
@@ -606,7 +784,9 @@ def render_plan(result):
                 for ingredient in meal["additional_ingredients"]:
                     st.write(f"• {ingredient}")
             else:
-                st.write("추가 재료 없음으로 제안됐어요.")
+                st.write(
+                    "추가 재료 없음으로 제안됐어요."
+                )
 
             st.markdown("**만드는 방법**")
 
@@ -642,7 +822,9 @@ def show_meal_recommendations(
 
     fridge_id = str(
         fridge_id
-        or st.session_state.get(f"active_fridge_{user_id}")
+        or st.session_state.get(
+            f"active_fridge_{user_id}"
+        )
         or ""
     )
 
@@ -659,24 +841,7 @@ def show_meal_recommendations(
     )
 
     if is_dog:
-        st.info(
-            "선택한 냉장고의 재료 중 지원하는 단일 재료로 "
-            "토핑·간식 후보 세 가지를 제안해요. "
-            "강아지의 하루 주식이나 치료 식단을 "
-            "만드는 기능은 아니에요."
-        )
-
-        st.caption(
-            "지원 재료: "
-            + ", ".join(sorted(DOG_INGREDIENT_NAMES))
-        )
-
-        st.caption(
-            "지원 목록 밖의 재료와 이름이 불명확한 "
-            "가공식품은 이번 요청에서 제외해요. "
-            "제외된 재료가 모두 유해하다는 뜻은 아니에요."
-        )
-
+        st.info(DOG_GUIDANCE)
     else:
         st.info(
             "선택한 냉장고의 저장된 재료·제외할 음식·"
@@ -717,8 +882,62 @@ def show_meal_recommendations(
     scope = f"{user_id}_{profile_id}_{target}"
 
     selected_meals = None
+    selected_ingredients = None
 
-    if not is_dog:
+    if is_dog:
+        options, omitted = dog_ingredient_options(
+            settings,
+            local_today,
+        )
+
+        if omitted:
+            st.caption(
+                "기한·제외 조건 또는 재료명 필터로 "
+                "선택 목록에서 제외한 재료: "
+                + ", ".join(omitted)
+            )
+
+        if not options:
+            st.info(
+                "현재 선택할 수 있는 재료가 없어요. "
+                "냉장고 재료와 식사 조건을 확인해 주세요."
+            )
+            return
+
+        selection_key = (
+            f"meal_ai_dog_ingredients_{scope}_"
+            f"{fingerprint(fridge_id)}"
+        )
+
+        memory_key = f"{selection_key}_saved"
+
+        previous = st.session_state.get(
+            selection_key,
+            st.session_state.get(memory_key, []),
+        )
+
+        st.session_state[selection_key] = [
+            name
+            for name in previous
+            if name in options
+        ]
+
+        selected_ingredients = st.multiselect(
+            "추천에 사용할 재료",
+            options=options,
+            key=selection_key,
+        )
+
+        st.session_state[memory_key] = list(
+            selected_ingredients
+        )
+
+        st.caption(
+            "재료는 한 개 이상 선택해 주세요. "
+            "선택은 현재 접속 중에 관리 대상·냉장고별로 유지돼요."
+        )
+
+    else:
         labels = dict(MEAL_SECTIONS)
 
         selected_meals = st.multiselect(
@@ -726,12 +945,16 @@ def show_meal_recommendations(
             options=list(labels),
             default=list(labels),
             format_func=lambda field: labels[field],
-            key=f"meal_ai_meals_{scope}_{fingerprint(fridge_id)}",
+            key=(
+                f"meal_ai_meals_{scope}_"
+                f"{fingerprint(fridge_id)}"
+            ),
         )
 
         st.caption(
-            "아침·점심·저녁 중 원하는 끼니를 한 개 이상 "
-            "선택해 주세요. 선택한 끼니만 추천해요."
+            "아침·점심·저녁 중 원하는 끼니를 "
+            "한 개 이상 선택해 주세요. "
+            "선택한 끼니만 추천해요."
         )
 
     additional_requests = st.text_area(
@@ -746,7 +969,10 @@ def show_meal_recommendations(
             )
         ),
         max_chars=1000,
-        key=f"meal_ai_extra_{scope}_{fingerprint(fridge_id)}",
+        key=(
+            f"meal_ai_extra_{scope}_"
+            f"{fingerprint(fridge_id)}"
+        ),
     )
 
     st.caption(
@@ -763,29 +989,11 @@ def show_meal_recommendations(
             today=local_today,
             additional_requests=additional_requests,
             selected_meals=selected_meals,
+            selected_ingredients=selected_ingredients,
         )
-
     except (ValueError, TypeError, OverflowError) as error:
         st.warning(str(error))
         return
-
-    if is_dog:
-        used = {
-            item["name"]
-            for item in request_data["ingredients"]
-        }
-
-        skipped = [
-            item["name"]
-            for item in settings.get("ingredients", [])
-            if item["name"] not in used
-        ]
-
-        if skipped:
-            st.caption(
-                "이번 강아지 추천에서 제외된 재료: "
-                + ", ".join(skipped)
-            )
 
     with st.expander("추천에 사용할 내용 확인"):
         st.write(
@@ -833,9 +1041,9 @@ def show_meal_recommendations(
             )
 
             st.write(
-                f"한 끼 인분 수: {request_data['servings']}인분"
+                f"한 끼 인분 수: "
+                f"{request_data['servings']}인분"
             )
-
         else:
             st.write(
                 "급여 분량 수는 AI에 보내지 않아요. "
@@ -864,16 +1072,19 @@ def show_meal_recommendations(
     )
 
     result_key = (
-        f"meal_ai_result_{scope}_{fingerprint(fridge_id)}"
+        f"meal_ai_result_{scope}_"
+        f"{fingerprint(fridge_id)}"
     )
 
-    last_request_key = f"meal_ai_last_request_{scope}"
+    last_request_key = (
+        f"meal_ai_last_request_{scope}"
+    )
 
-    # 계정·냉장고 정보는 앱 내부의 결과 구분에만 사용해요.
+    # 계정·냉장고 정보는 앱 내부 결과 구분에만 사용해요.
     # AI에는 request_data만 전달해요.
     request_version = fingerprint({
         "request_data": request_data,
-        "response_style": "selected_meals_v1",
+        "response_style": "dog_selected_ingredients_v1",
         "fridge_id": fridge_id,
         "local_date": local_today.isoformat(),
         "timezone": timezone_name,
@@ -890,7 +1101,7 @@ def show_meal_recommendations(
         )
 
     button_label = (
-        "🐶 선택된 재료를 Gemini로 보내고 후보 추천받기"
+        "🐶 선택한 재료로 토핑·간식 후보 추천받기"
         if is_dog
         else "🍽️ 선택한 끼니 메뉴 추천받기"
     )
@@ -914,9 +1125,10 @@ def show_meal_recommendations(
                 "이전 요청 후 20초가 지나면 "
                 "다시 추천받을 수 있어요."
             )
-
         else:
-            st.session_state[last_request_key] = time.monotonic()
+            st.session_state[last_request_key] = (
+                time.monotonic()
+            )
 
             spinner_message = (
                 "토핑·간식 후보를 만들고 있어요…"
@@ -962,14 +1174,12 @@ def show_meal_recommendations(
                         "현재 프로젝트에서 요청이 허용되지 않았어요. "
                         "AI Studio의 접근 권한과 이용 상태를 확인해 주세요."
                     )
-
                 elif error.status_code == 404:
                     st.error(
                         "사용할 모델을 찾지 못했어요. "
                         f"AI Studio에서 {MODEL}의 "
                         "사용 가능 여부를 확인해 주세요."
                     )
-
                 else:
                     st.warning(
                         "Gemini가 추천 요청을 처리하지 못했어요. "
@@ -990,9 +1200,13 @@ def show_meal_recommendations(
                     "request_version": request_version,
                     "target": target,
                     "servings": request_data.get("servings"),
-                    "selected_meals": request_data.get("selected_meals"),
+                    "selected_meals": request_data.get(
+                        "selected_meals"
+                    ),
                     "created_at": (
-                        get_local_now().strftime("%Y-%m-%d %H:%M")
+                        get_local_now().strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
                         + f" ({timezone_name})"
                     ),
                     "plan": plan,
@@ -1009,11 +1223,10 @@ def show_meal_recommendations(
     if result:
         if result["request_version"] != request_version:
             st.info(
-                "선택한 끼니·재료·조건·추가 요청사항·날짜·시간대 "
-                "또는 추천 안내 방식이 바뀌었어요. "
+                "선택한 끼니·선택한 재료·조건·추가 요청사항·"
+                "날짜·시간대 또는 추천 안내 방식이 바뀌었어요. "
                 "현재 기준으로 다시 추천받아 주세요."
             )
-
         else:
             st.divider()
             render_plan(result)
