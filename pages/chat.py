@@ -57,7 +57,8 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 .stApp {
     background-color: #FFF9F9;
@@ -67,7 +68,9 @@ div.stButton > button {
     border-radius: 14px;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # 사이드바와 로그인
@@ -212,7 +215,7 @@ st.caption(
 )
 
 
-# 일반 채팅만 별도 세션 키에 보관
+# 대화는 접속 세션의 관리 대상별 목록에 보관
 scope = f"{user.id}_{profile_id}"
 messages_key = f"care_general_chat_v2_{scope}"
 
@@ -220,17 +223,21 @@ if messages_key not in st.session_state:
     st.session_state[messages_key] = []
 
 if st.button(
-    "🗑️ 일반 대화 지우기",
+    "🗑️ 현재 대화 지우기",
     key=f"clear_general_chat_v2_{scope}",
 ):
     st.session_state[messages_key] = []
     st.rerun()
 
 st.caption(
-    "일반 대화는 현재 접속 세션에서만 보관해요. "
-    "AI에는 최근 6번의 질문·답변을 함께 보내며, "
-    "화면에는 최근 10번의 대화를 남겨요. "
-    "대화 지우기는 앱 안의 일반 대화 목록을 비우는 기능이에요."
+    "새로고침하거나 앱을 나갔다가 다시 접속하면 "
+    "대화가 초기화될 수 있어요."
+)
+
+st.caption(
+    "AI 사용량 제한이나 일시적인 서버 문제로 "
+    "답변을 받지 못할 수 있어요. "
+    "이 경우 잠시 후 다시 시도해 주세요."
 )
 
 
@@ -247,7 +254,7 @@ if not api_key:
     st.stop()
 
 
-# 일반 대화 표시
+# 대화 표시
 history = st.session_state[messages_key]
 
 if not history:
@@ -273,7 +280,9 @@ if user_input:
     question = user_input.strip()
 
     if not question:
-        st.warning("질문을 입력해 주세요.")
+        st.warning(
+            "질문을 입력해 주세요."
+        )
         st.stop()
 
     if len(question) > 3000:
@@ -285,7 +294,7 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(question)
 
-    # 직접 입력한 질문과 일반 채팅의 최근 대화만 전송
+    # 직접 입력한 질문과 최근 대화만 전송
     request_messages = [
         {
             "role": "system",
