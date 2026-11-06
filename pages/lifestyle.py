@@ -377,8 +377,7 @@ def show_record_summary(rows, start, end, kind_filter):
 
     if kind_filter in ["전체", "운동·산책"]:
         st.caption(
-            f"운동·산책 기록 {len(activities)}건 · "
-            f"활동 없음 확인 {len(confirmed_days)}일"
+            f"운동·산책 기록 {len(activities)}건"
         )
 
     if kind_filter in ["전체", "수면"]:
