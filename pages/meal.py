@@ -320,11 +320,9 @@ def show_fridge_picker(client, user_id):
                     st.session_state[
                         f"fridge_pending_{user_id}"
                     ] = fridge_id
-
                     st.session_state[
                         f"meal_notice_{user_id}"
                     ] = f"‘{name}’을 만들었어요."
-
                     st.rerun()
 
     if not fridges:
@@ -374,7 +372,6 @@ def show_fridge_picker(client, user_id):
                     f"{fingerprint(fridge['name'])}"
                 ),
             )
-
             saved = st.form_submit_button(
                 "이름 변경 저장",
                 use_container_width=True,
@@ -423,7 +420,6 @@ def show_fridge_picker(client, user_id):
                     st.session_state[
                         f"meal_notice_{user_id}"
                     ] = "냉장고 이름을 변경했어요."
-
                     st.rerun()
 
     return fridge
@@ -453,6 +449,241 @@ def save_conditions(
     )
 
 
+def show_conditions_section(
+    client,
+    user_id,
+    profile_id,
+    profile,
+    settings,
+):
+    scope = f"{user_id}_{profile_id}"
+    is_person = profile["profile_type"] == "사람"
+
+    edit_key = f"meal_conditions_editing_{scope}"
+    cycle_key = f"meal_conditions_cycle_{scope}"
+    notice_key = f"meal_conditions_notice_{scope}"
+
+    has_settings = bool(settings)
+    editing = (
+        not has_settings
+        or st.session_state.get(edit_key, False)
+    )
+    cycle = st.session_state.get(cycle_key, 0)
+
+    guidance_label = (
+        "의료진에게 받은 식사 지침(선택)"
+        if is_person
+        else "수의사에게 받은 급여 지침(선택)"
+    )
+
+    st.subheader(f"⚙️ {profile['name']}의 식사 조건")
+    st.caption(
+        "식사 조건은 현재 선택한 관리 대상에게만 저장돼요. "
+        "다른 대상의 식사 조건을 확인하거나 입력하려면 "
+        "왼쪽 사이드바의 ‘관리 대상’ 목록에서 해당 이름을 선택해 주세요."
+    )
+
+    if not is_person:
+        st.info(
+            "반려동물도 선택한 냉장고와 개별 식사 조건을 저장할 수 있어요. "
+            "강아지를 선택하면 아래에서 토핑·간식 후보를 추천받을 수 있어요."
+        )
+        st.page_link(
+            "pages/lifestyle.py",
+            label="반려동물의 사료·간식 섭취 기록하기",
+            icon="📝",
+        )
+
+    # 저장된 조건이 있고 수정 중이 아니면 요약 표시
+    if not editing:
+        with st.container(border=True):
+            st.markdown("**저장된 식사 조건**")
+
+            for label, field in [
+                ("알레르기", "allergies"),
+                ("제외할 음식·재료", "excluded_foods"),
+                (guidance_label, "dietary_guidance"),
+            ]:
+                st.markdown(f"**{label}**")
+                st.write(settings.get(field) or "미입력")
+
+            c1, c2 = st.columns(2)
+
+            c1.metric(
+                (
+                    "한 끼 기준 인분 수"
+                    if is_person
+                    else "준비할 급여 분량 수"
+                ),
+                settings.get("servings") or 1,
+            )
+            c2.metric(
+                "최대 조리 시간",
+                f"{settings.get('max_cooking_minutes') or 30}분",
+            )
+
+            st.caption(
+                "저장한 알레르기와 의료진·수의사 지침은 보관용이며 "
+                "AI 메뉴 추천에 전송되거나 자동 반영되지 않아요."
+            )
+
+            if st.button(
+                "✏️ 식사 조건 수정",
+                key=f"meal_conditions_open_{scope}",
+                use_container_width=True,
+            ):
+                st.session_state[edit_key] = True
+                st.session_state[cycle_key] = cycle + 1
+                st.rerun()
+
+            notice = st.session_state.pop(
+                notice_key, None
+            )
+            if notice:
+                st.success(notice)
+
+        return
+
+    st.caption(
+        (
+            "기존 값을 바꾼 뒤 ‘수정 내용 저장’을 눌러 주세요. "
+            "‘취소’를 누르면 변경한 내용은 저장하지 않아요."
+        )
+        if has_settings
+        else (
+            "식사 조건을 처음 등록해요. "
+            "입력한 뒤 ‘식사 조건 저장’을 눌러 주세요."
+        )
+    )
+
+    with st.form(
+        f"meal_conditions_{scope}_"
+        f"{fingerprint(settings)}_{cycle}"
+    ):
+        allergies = st.text_area(
+            "알레르기",
+            value=settings.get("allergies") or "",
+            placeholder=(
+                "확인된 알레르기를 입력해 주세요. "
+                "없다면 ‘없음’이라고 입력해 주세요."
+            ),
+            max_chars=1000,
+        )
+
+        st.caption(
+            "알레르기는 현재 보관용이며 AI 메뉴 추천에 "
+            "전송되거나 자동 반영되지 않아요."
+        )
+
+        excluded_foods = st.text_area(
+            "제외하고 싶은 음식·재료",
+            value=settings.get("excluded_foods") or "",
+            placeholder="제외할 음식·재료 이름을 입력해 주세요.",
+            max_chars=1000,
+        )
+
+        dietary_guidance = st.text_area(
+            guidance_label,
+            value=settings.get("dietary_guidance") or "",
+            placeholder="안내받은 내용이 있으면 입력해 주세요.",
+            max_chars=3000,
+        )
+
+        st.caption(
+            "이 지침은 현재 보관용이며 AI 메뉴 추천에 "
+            "전송되거나 자동 반영되지 않아요."
+        )
+
+        c1, c2 = st.columns(2)
+
+        servings = c1.number_input(
+            (
+                "한 끼 기준 인분 수"
+                if is_person
+                else "한 번 준비할 급여 분량 수"
+            ),
+            min_value=1,
+            max_value=20,
+            value=int(settings.get("servings") or 1),
+            step=1,
+        )
+
+        if not is_person:
+            st.caption(
+                "분량 수는 준비 횟수를 뜻하며, "
+                "적정 급여량이나 영양 균형을 계산하는 값은 아니에요."
+            )
+
+        cooking_minutes = c2.number_input(
+            "한 끼 최대 조리 시간(분)",
+            min_value=5,
+            max_value=240,
+            value=int(
+                settings.get("max_cooking_minutes") or 30
+            ),
+            step=5,
+        )
+
+        save_clicked = st.form_submit_button(
+            (
+                "💾 수정 내용 저장"
+                if has_settings
+                else "💾 식사 조건 저장"
+            ),
+            use_container_width=True,
+        )
+
+        cancel_clicked = False
+
+        if has_settings:
+            cancel_clicked = st.form_submit_button(
+                "취소",
+                use_container_width=True,
+            )
+
+    # 취소하면 데이터베이스를 변경하지 않고 요약으로 복귀
+    if cancel_clicked:
+        st.session_state[edit_key] = False
+        st.session_state[cycle_key] = cycle + 1
+        st.rerun()
+        return
+
+    if save_clicked:
+        try:
+            save_conditions(
+                client,
+                user_id,
+                profile_id,
+                {
+                    "allergies": allergies.strip(),
+                    "excluded_foods": excluded_foods.strip(),
+                    "dietary_guidance": dietary_guidance.strip(),
+                    "servings": int(servings),
+                    "max_cooking_minutes": int(cooking_minutes),
+                },
+                has_settings,
+            )
+
+        except Exception as error:
+            show_error(
+                "식사 조건 저장 결과를 확인하지 못했어요. "
+                "페이지를 다시 열어 확인해 주세요.",
+                error,
+            )
+
+        else:
+            st.session_state[edit_key] = False
+            st.session_state[cycle_key] = cycle + 1
+
+            st.session_state[notice_key] = (
+                f"{profile['name']}의 식사 조건을 수정했어요."
+                if has_settings
+                else f"{profile['name']}의 식사 조건을 저장했어요."
+            )
+
+            st.rerun()
+
+
 st.set_page_config(
     page_title="냉장고 식단 추천 | 당당케어",
     page_icon="🍽️",
@@ -477,7 +708,6 @@ div[data-testid="stForm"] {
     border: 1px solid #EEEEEE;
 }
 
-/* 냉장고 이름 변경 입력란의 선택 테두리 */
 [class*="st-key-fridge_rename_name_"] [data-baseweb="input"]:focus-within,
 [class*="st-key-fridge_rename_name_"] [data-testid="stTextInputRootElement"]:focus-within {
     border-color: #2563EB !important;
@@ -909,134 +1139,13 @@ else:
                 )
                 st.rerun()
 
-st.subheader(f"⚙️ {profile['name']}의 식사 조건")
-st.caption(
-    "아래 조건은 현재 선택한 관리 대상에게만 저장돼요. "
-    "다른 대상의 식사 조건을 입력하려면 왼쪽 사이드바의 "
-    "‘관리 대상’ 목록에서 해당 이름을 선택해 주세요."
+show_conditions_section(
+    client,
+    user.id,
+    profile_id,
+    profile,
+    settings,
 )
-
-if not is_person:
-    st.info(
-        "반려동물도 선택한 냉장고와 개별 식사 조건을 "
-        "저장할 수 있어요. 강아지를 선택하면 아래에서 "
-        "토핑·간식 후보를 추천받을 수 있어요."
-    )
-    st.page_link(
-        "pages/lifestyle.py",
-        label="반려동물의 사료·간식 섭취 기록하기",
-        icon="📝",
-    )
-
-with st.form(
-    f"meal_conditions_{scope}_{fingerprint(settings)}"
-):
-    allergies = st.text_area(
-        "알레르기",
-        value=settings.get("allergies") or "",
-        placeholder=(
-            "확인된 알레르기를 입력해 주세요. "
-            "없다면 ‘없음’이라고 입력해 주세요."
-        ),
-        max_chars=1000,
-    )
-
-    st.caption(
-        "알레르기는 현재 보관용이며 AI 메뉴 추천에 "
-        "전송되거나 자동 반영되지 않아요."
-    )
-
-    excluded_foods = st.text_area(
-        "제외하고 싶은 음식·재료",
-        value=settings.get("excluded_foods") or "",
-        placeholder="제외할 음식·재료 이름을 입력해 주세요.",
-        max_chars=1000,
-    )
-
-    guidance_label = (
-        "의료진에게 받은 식사 지침(선택)"
-        if is_person
-        else "수의사에게 받은 급여 지침(선택)"
-    )
-
-    dietary_guidance = st.text_area(
-        guidance_label,
-        value=settings.get("dietary_guidance") or "",
-        placeholder="안내받은 내용이 있으면 입력해 주세요.",
-        max_chars=3000,
-    )
-
-    st.caption(
-        "이 지침은 현재 보관용이며 AI 메뉴 추천에 "
-        "전송되거나 자동 반영되지 않아요."
-    )
-
-    c1, c2 = st.columns(2)
-
-    servings = c1.number_input(
-        "한 끼 기준 인분 수"
-        if is_person else "한 번 준비할 급여 분량 수",
-        min_value=1,
-        max_value=20,
-        value=int(settings.get("servings") or 1),
-        step=1,
-    )
-
-    if not is_person:
-        st.caption(
-            "분량 수는 준비 횟수를 뜻하며, "
-            "적정 급여량이나 영양 균형을 계산하는 값은 아니에요."
-        )
-
-    cooking_minutes = c2.number_input(
-        "한 끼 최대 조리 시간(분)",
-        min_value=5,
-        max_value=240,
-        value=int(settings.get("max_cooking_minutes") or 30),
-        step=5,
-    )
-
-    save_conditions_clicked = st.form_submit_button(
-        "💾 현재 대상의 식사 조건 저장",
-        use_container_width=True,
-    )
-
-    conditions_notice = st.session_state.pop(
-        f"meal_conditions_notice_{scope}", None
-    )
-
-    if conditions_notice:
-        st.success(conditions_notice)
-
-if save_conditions_clicked:
-    try:
-        save_conditions(
-            client,
-            user.id,
-            profile_id,
-            {
-                "allergies": allergies.strip(),
-                "excluded_foods": excluded_foods.strip(),
-                "dietary_guidance": dietary_guidance.strip(),
-                "servings": int(servings),
-                "max_cooking_minutes": int(cooking_minutes),
-            },
-            bool(settings),
-        )
-
-    except Exception as error:
-        show_error(
-            "식사 조건 저장 결과를 확인하지 못했어요. "
-            "페이지를 다시 열어 확인해 주세요.",
-            error,
-        )
-
-    else:
-        st.session_state[
-            f"meal_conditions_notice_{scope}"
-        ] = f"{profile['name']}의 식사 조건을 저장했어요."
-
-        st.rerun()
 
 st.divider()
 st.markdown("### 📋 현재 저장된 내용")
@@ -1232,25 +1341,6 @@ with st.expander(
                         f"{len(selected_set)}종류를 삭제했어요."
                     )
                     st.rerun()
-
-if not settings:
-    st.info(
-        f"{profile['name']}의 식사 조건은 "
-        "아직 저장하지 않았어요."
-    )
-
-with st.expander(
-    f"{profile['name']}의 저장한 식사 조건 보기"
-):
-    condition_fields = [
-        ("알레르기", "allergies"),
-        ("제외할 음식·재료", "excluded_foods"),
-        (guidance_label, "dietary_guidance"),
-    ]
-
-    for label, field in condition_fields:
-        st.markdown(f"**{label}**")
-        st.write(settings.get(field) or "미입력")
 
 st.caption(
     "입력란을 수정해도 해당 저장 버튼을 누르기 전에는 "
