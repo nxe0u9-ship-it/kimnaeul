@@ -167,8 +167,10 @@ def ingredient_is_current(item, today):
     try:
         if isinstance(value, datetime):
             expiry = value.date()
+
         elif isinstance(value, date):
             expiry = value
+
         else:
             expiry = date.fromisoformat(
                 str(value).strip()
@@ -677,13 +679,6 @@ def show_meal_recommendations(
 
     local_today = get_local_now().date()
     timezone_name = get_timezone_name()
-
-    st.caption(
-        f"재료 기한 확인 기준: {local_today:%Y-%m-%d} "
-        f"({timezone_name}). 기한이 지났거나 날짜가 잘못된 "
-        "재료는 제외하고, 기한 미입력 재료는 포함해요."
-    )
-
     scope = f"{user_id}_{profile_id}_{target}"
 
     additional_requests = st.text_area(
@@ -805,10 +800,11 @@ def show_meal_recommendations(
         )
 
     st.caption(
-        "재료나 식사 조건을 바꿨다면 재료 추가·수정 저장 버튼 또는 "
-        "‘현재 대상의 식사 조건 저장’을 눌러 주세요. "
-        "재료·식사 조건은 저장된 내용으로, "
-        "추가 요청사항은 현재 입력한 내용으로 추천해요."
+        "재료를 추가하거나 수정했다면 해당 저장 버튼을 눌러 주세요. "
+        "식사 조건을 바꾸려면 ‘식사 조건 수정’을 누르고 "
+        "변경 후 ‘수정 내용 저장’을 눌러 주세요. "
+        "추가 요청사항은 따로 저장하지 않아도 "
+        "추천 버튼을 누를 때 함께 반영돼요."
     )
 
     result_key = (
@@ -819,7 +815,6 @@ def show_meal_recommendations(
         f"meal_ai_last_request_{scope}"
     )
 
-    # 추가 요청이 달라지면 기존 결과와 구분합니다.
     request_version = fingerprint({
         "request_data": request_data,
         "response_style": "polite_v1",
